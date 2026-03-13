@@ -1,0 +1,16 @@
+SUMMARIZER — INSTALLATION
+─────────────────────────
+
+1. Open Terminal (Cmd+Space → type "Terminal" → Enter)
+
+2. Paste this command and press Enter:
+
+   cp -R ~/Downloads/Summarizer.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Summarizer.app && open /Applications/Summarizer.app
+
+3. Done — Summarizer will launch from /Applications.
+   Next time just open it from Applications or Spotlight normally.
+
+
+WHY IS THIS NEEDED?
+macOS blocks apps from unidentified developers by default.
+This command copies the app to Applications and removes that restriction.

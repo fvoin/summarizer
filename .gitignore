@@ -1,0 +1,11 @@
+dist/
+build/
+.venv/
+models/
+bundled_ffmpeg/
+*.spec
+*.icns
+*.pyc
+__pycache__/
+*.egg-info/
+.DS_Store

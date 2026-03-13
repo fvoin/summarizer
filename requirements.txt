@@ -1,0 +1,9 @@
+PyQt6
+sounddevice
+soundfile
+numpy
+faster-whisper
+google-generativeai
+openai
+anthropic
+pyinstaller

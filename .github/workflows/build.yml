@@ -1,0 +1,88 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14        # Apple Silicon (arm64)
+            arch: arm64
+            label: AppleSilicon
+          - os: macos-13        # Intel (x86_64)
+            arch: x86_64
+            label: Intel
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.label }})
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ matrix.arch }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-${{ matrix.arch }}-
+
+      - name: Cache Whisper model
+        uses: actions/cache@v4
+        with:
+          path: ~/.summarizer/models/base
+          key: whisper-base-v1
+
+      - name: Cache ffmpeg binary
+        uses: actions/cache@v4
+        with:
+          path: bundled_ffmpeg
+          key: ffmpeg-${{ matrix.arch }}-v1
+
+      - name: Build app
+        env:
+          DMG_NAME: Summarizer-${{ matrix.label }}.dmg
+        run: bash build.sh
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Summarizer-${{ matrix.label }}
+          path: dist/Summarizer-${{ matrix.label }}.dmg
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+
+    steps:
+      - name: Download Apple Silicon DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: Summarizer-AppleSilicon
+          path: dist/
+
+      - name: Download Intel DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: Summarizer-Intel
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Summarizer ${{ github.ref_name }}
+          files: |
+            dist/Summarizer-AppleSilicon.dmg
+            dist/Summarizer-Intel.dmg
+          generate_release_notes: true
