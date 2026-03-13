@@ -6,19 +6,9 @@ on:
       - "v*"
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: macos-14        # Apple Silicon (arm64)
-            arch: arm64
-            label: AppleSilicon
-          - os: macos-13        # Intel (x86_64)
-            arch: x86_64
-            label: Intel
-
-    runs-on: ${{ matrix.os }}
-    name: Build (${{ matrix.label }})
+  build-arm64:
+    runs-on: macos-14          # Apple Silicon (arm64) — free
+    name: Build (Apple Silicon)
 
     steps:
       - name: Checkout source
@@ -33,35 +23,35 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-${{ matrix.arch }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: pip-${{ matrix.arch }}-
+          key: pip-arm64-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-arm64-
 
       - name: Cache Whisper model
         uses: actions/cache@v4
         with:
           path: ~/.summarizer/models/base
-          key: whisper-base-v1
+          key: whisper-base-v2
 
       - name: Cache ffmpeg binary
         uses: actions/cache@v4
         with:
           path: bundled_ffmpeg
-          key: ffmpeg-${{ matrix.arch }}-v1
+          key: ffmpeg-arm64-v1
 
       - name: Build app
         env:
-          DMG_NAME: Summarizer-${{ matrix.label }}.dmg
+          DMG_NAME: Summarizer-AppleSilicon.dmg
         run: bash build.sh
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Summarizer-${{ matrix.label }}
-          path: dist/Summarizer-${{ matrix.label }}.dmg
+          name: Summarizer-AppleSilicon
+          path: dist/Summarizer-AppleSilicon.dmg
           retention-days: 7
 
   release:
-    needs: build
+    needs: build-arm64
     runs-on: ubuntu-latest
     name: Create GitHub Release
 
@@ -72,17 +62,9 @@ jobs:
           name: Summarizer-AppleSilicon
           path: dist/
 
-      - name: Download Intel DMG
-        uses: actions/download-artifact@v4
-        with:
-          name: Summarizer-Intel
-          path: dist/
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Summarizer ${{ github.ref_name }}
-          files: |
-            dist/Summarizer-AppleSilicon.dmg
-            dist/Summarizer-Intel.dmg
+          files: dist/Summarizer-AppleSilicon.dmg
           generate_release_notes: true
