@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 from typing import Optional, List
 
-APP_VERSION = "1.10"
+_logger = logging.getLogger("config")
+
+APP_VERSION = "1.13.7"
 
 _CONFIG_DIR = Path.home() / ".summarizer"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
@@ -87,7 +89,10 @@ _DEFAULTS = {
     "whisper_model": "base",
     "save_audio": False,
     "context_limit": 5000,
-    "silence_timeout": 30,
+    "silence_timeout": 180,
+    "sound_on_done": True,
+    "transcribe_only": False,
+    "context_profiles": {},
     "input_device": None,
     "recordings_dir": "",
 }
@@ -244,11 +249,17 @@ LOCAL_LLM_MODELS = {
         "quality": "Better",
         "ollama_name": "gemma3:12b-it-qat",
     },
-    "gemma3:27b-it-qat": {
-        "display": "Gemma 3 27B QAT",
-        "size_gb": 18.0,
-        "quality": "Best (24+ GB RAM)",
-        "ollama_name": "gemma3:27b-it-qat",
+    "qwen3:30b": {
+        "display": "Qwen 3 30B",
+        "size_gb": 19.0,
+        "quality": "Great (24+ GB RAM)",
+        "ollama_name": "qwen3:30b",
+    },
+    "gpt-oss:20b": {
+        "display": "GPT-OSS 20B",
+        "size_gb": 12.0,
+        "quality": "Best (16+ GB RAM)",
+        "ollama_name": "gpt-oss:20b",
     },
 }
 
@@ -298,22 +309,30 @@ def list_ollama_models() -> list[str]:
     import subprocess
     ollama = find_ollama()
     if not ollama:
+        _logger.info("list_ollama_models: ollama binary not found")
         return []
     try:
-        r = subprocess.run([ollama, "list"], capture_output=True, text=True, timeout=5)
+        r = subprocess.run([ollama, "list"], capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            _logger.warning("ollama list failed (rc=%d): %s", r.returncode, r.stderr.strip())
+            ensure_ollama_server(ollama)
+            r = subprocess.run([ollama, "list"], capture_output=True, text=True, timeout=10)
         lines = r.stdout.strip().splitlines()[1:]  # skip header
-        return [line.split()[0] for line in lines if line.strip()]
-    except Exception:
+        models = [line.split()[0] for line in lines if line.strip()]
+        _logger.info("list_ollama_models: found %d models: %s", len(models), models)
+        return models
+    except Exception as e:
+        _logger.warning("list_ollama_models error: %s", e)
         return []
 
 
-def is_local_llm_downloaded(model_key: str) -> bool:
+def is_local_llm_downloaded(model_key: str, _pulled: list[str] | None = None) -> bool:
     info = LOCAL_LLM_MODELS.get(model_key)
     if not info:
         return False
-    pulled = list_ollama_models()
-    name = info["ollama_name"]
-    return name in pulled
+    if _pulled is None:
+        _pulled = list_ollama_models()
+    return info["ollama_name"] in _pulled
 
 
 def delete_local_llm(model_key: str):
@@ -366,6 +385,22 @@ def delete_profile(name: str):
     if cfg.get("active_profile") == name:
         cfg["active_profile"] = next(iter(profiles))
         cfg["instructions"] = profiles[cfg["active_profile"]]
+    save(cfg)
+
+
+def get_context_profile(context_name: str) -> str:
+    """Return the saved instruction profile for a context, or the global active profile."""
+    cfg = load()
+    context_profiles = cfg.get("context_profiles", {})
+    return context_profiles.get(context_name, cfg.get("active_profile", DEFAULT_PROFILE_NAME))
+
+
+def set_context_profile(context_name: str, profile_name: str):
+    """Save the instruction profile association for a context."""
+    cfg = load()
+    context_profiles = cfg.get("context_profiles", {})
+    context_profiles[context_name] = profile_name
+    cfg["context_profiles"] = context_profiles
     save(cfg)
 
 
