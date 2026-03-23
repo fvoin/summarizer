@@ -379,8 +379,7 @@ class RealtimeTranscribeWorker(QThread):
             audio_data, sample_rate = latest
             try:
                 text = self._transcriber.transcribe_array(audio_data, sample_rate)
-                if text:
-                    self.chunk_ready.emit(text, len(audio_data))
+                self.chunk_ready.emit(text or "", len(audio_data))
             except Exception as e:
                 _logger.warning("RealtimeTranscribeWorker: chunk failed: %s", e)
 
