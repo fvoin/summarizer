@@ -26,34 +26,127 @@ AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".w
 
 # ── context I/O ──────────────────────────────────────────────────────────
 
-def load_context(name: str) -> Optional[str]:
+_GENERAL_MARKER = "=== GENERAL ==="
+_HISTORY_MARKER = "=== HISTORY ==="
+
+
+def _parse_context_file(path: Path) -> tuple[str, str]:
+    """Return (general_text, history_text) from a structured context file."""
+    if not path.exists():
+        return "", ""
+    raw = path.read_text(encoding="utf-8")
+    if _GENERAL_MARKER not in raw:
+        return "", raw.strip()
+    gen_start = raw.index(_GENERAL_MARKER) + len(_GENERAL_MARKER)
+    if _HISTORY_MARKER in raw:
+        hist_start = raw.index(_HISTORY_MARKER) + len(_HISTORY_MARKER)
+        general = raw[gen_start:raw.index(_HISTORY_MARKER)].strip()
+        history = raw[hist_start:].strip()
+    else:
+        general = raw[gen_start:].strip()
+        history = ""
+    return general, history
+
+
+def _write_context_file(path: Path, general: str, history: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    parts = [_GENERAL_MARKER, general.strip(), "", _HISTORY_MARKER, history.strip()]
+    path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+
+
+def load_general_context(name: str) -> str:
+    """Load only the GENERAL section of a context file."""
     path = config.get_recordings_dir() / f"{name}_context.txt"
-    if path.exists():
-        content = path.read_text(encoding="utf-8").strip()
-        if not content:
-            return None
-        limit = config.load().get("context_limit", 5000)
-        if limit and len(content) > limit:
-            content = content[-limit:]
-            cut = content.find("\n")
-            if cut > 0:
-                content = content[cut + 1:]
-        return content
-    return None
+    general, _ = _parse_context_file(path)
+    return general
 
 
-def save_to_context(name: str, summary: str, quick_context: Optional[str] = None):
+def save_general_context(name: str, general: str):
+    """Save updated GENERAL section, preserving HISTORY."""
     rdir = config.get_recordings_dir()
     rdir.mkdir(parents=True, exist_ok=True)
     path = rdir / f"{name}_context.txt"
+    _, history = _parse_context_file(path)
+    _write_context_file(path, general, history)
+
+
+def create_context(name: str):
+    """Create an empty context file if it doesn't exist."""
+    rdir = config.get_recordings_dir()
+    rdir.mkdir(parents=True, exist_ok=True)
+    path = rdir / f"{name}_context.txt"
+    if not path.exists():
+        _write_context_file(path, "", "")
+
+
+def load_context_for_prompt(name: str, general_text: str, meeting_text: str) -> Optional[str]:
+    """Build the context string for the LLM prompt.
+
+    Always includes general_text + meeting_text in full.
+    Fills remaining budget with history entries (newest first).
+    """
+    limit = config.load().get("context_limit", 5000)
+    path = config.get_recordings_dir() / f"{name}_context.txt"
+    _, history = _parse_context_file(path)
+
+    parts = []
+    budget = limit
+
+    if general_text:
+        parts.append(f"General context:\n{general_text}")
+        budget -= len(parts[-1])
+    if meeting_text:
+        parts.append(f"This meeting context:\n{meeting_text}")
+        budget -= len(parts[-1])
+
+    if history and budget > 0:
+        trimmed = history
+        if len(trimmed) > budget:
+            trimmed = trimmed[:budget]
+            cut = trimmed.rfind("\n[")
+            if cut > 0:
+                trimmed = trimmed[:cut]
+        if trimmed.strip():
+            parts.append(f"Previous meetings:\n{trimmed.strip()}")
+
+    return "\n\n".join(parts) if parts else None
+
+
+def save_to_context(name: str, summary: str, general_text: str = "",
+                    meeting_text: str = ""):
+    rdir = config.get_recordings_dir()
+    rdir.mkdir(parents=True, exist_ok=True)
+    path = rdir / f"{name}_context.txt"
+    _, old_history = _parse_context_file(path)
+
     date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    parts = [f"\n\n--- {date_str} ---"]
-    if quick_context:
-        parts.append(f"Quick context: {quick_context}")
-    parts.append(summary)
-    entry = "\n".join(parts)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(entry)
+    entry_parts = [f"[{date_str}]"]
+    if meeting_text:
+        entry_parts.append(f"Meeting context: {meeting_text}")
+    entry_parts.append(f"Summary: {summary}")
+    new_entry = "\n".join(entry_parts)
+
+    history = f"{new_entry}\n\n{old_history}".strip() if old_history else new_entry
+    _write_context_file(path, general_text, history)
+
+
+def update_latest_context_entry(name: str, new_summary: str):
+    """Replace the Summary field in the most recent history entry."""
+    rdir = config.get_recordings_dir()
+    path = rdir / f"{name}_context.txt"
+    general, history = _parse_context_file(path)
+    if not history:
+        return
+    # Find the first "Summary:" line in history and replace until next entry
+    import re
+    updated = re.sub(
+        r"(Summary:)(.+?)(\n\n\[|\Z)",
+        lambda m: m.group(1) + " " + new_summary.strip() + "\n" + m.group(3),
+        history,
+        count=1,
+        flags=re.DOTALL,
+    )
+    _write_context_file(path, general, updated)
 
 
 def list_contexts() -> list[str]:
@@ -174,12 +267,15 @@ def _call_ollama(model_name: str, system: str, user_text: str) -> str:
     return resp.choices[0].message.content.strip()
 
 
-def call_llm(prompt: str, model: Optional[str] = None) -> str:
+def call_llm(prompt: str, model: Optional[str] = None, profile_name: str = "") -> str:
     cfg = config.load()
     config.apply_env(cfg)
     if model is None:
         model = cfg.get("model", "gemini-2.5-pro")
-    instructions = cfg.get("instructions", config.DEFAULT_INSTRUCTIONS)
+    if profile_name:
+        instructions = config.get_profile(profile_name)
+    else:
+        instructions = cfg.get("instructions", config.DEFAULT_INSTRUCTIONS)
 
     _log(f"Calling LLM model={model} prompt_len={len(prompt)}")
 
@@ -198,32 +294,36 @@ def call_llm(prompt: str, model: Optional[str] = None) -> str:
 def summarize(
     transcript: str,
     context_name: Optional[str] = None,
-    context_inline: Optional[str] = None,
+    general_text: str = "",
+    meeting_text: str = "",
+    profile_name: str = "",
     duration_seconds: Optional[int] = None,
 ) -> str:
     """Build prompt, call LLM, save context, return formatted summary.
 
-    Both context_name and context_inline can be provided simultaneously:
-    - context_name: loads prior summaries from file, saves new summary back
-    - context_inline: quick context always included in the prompt
+    - general_text: persistent info about this meeting series (always included)
+    - meeting_text: agenda / details for this particular meeting (always included)
+    - context_name: if set, loads history from file and saves new entry back
     """
-    parts = []
+    prior = None
     if context_name:
-        file_ctx = load_context(context_name)
-        if file_ctx:
-            parts.append(file_ctx)
-    if context_inline:
-        parts.append(context_inline)
-
-    prior = "\n\n".join(parts) if parts else None
+        prior = load_context_for_prompt(context_name, general_text, meeting_text)
+    else:
+        parts = []
+        if general_text:
+            parts.append(f"General context:\n{general_text}")
+        if meeting_text:
+            parts.append(f"This meeting context:\n{meeting_text}")
+        prior = "\n\n".join(parts) if parts else None
 
     prompt = build_prompt(transcript, prior, duration_seconds=duration_seconds)
-    raw = call_llm(prompt)
+    raw = call_llm(prompt, profile_name=profile_name)
     summary = format_summary(raw)
 
     if context_name:
         try:
-            save_to_context(context_name, summary, quick_context=context_inline)
+            save_to_context(context_name, summary, general_text=general_text,
+                            meeting_text=meeting_text)
         except Exception as e:
             _log(f"Failed to save context: {e}")
 

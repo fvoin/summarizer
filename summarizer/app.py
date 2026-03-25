@@ -31,6 +31,7 @@ from .summarizer import (
     create_context, TRANSCRIPT_EXTENSIONS, AUDIO_EXTENSIONS,
 )
 from .updater import check_for_update, download_and_open
+from .i18n import t
 
 _logger = logging.getLogger("app")
 
@@ -282,10 +283,10 @@ class TranscribeWorker(QThread):
 
     def run(self):
         try:
-            self.status.emit("Transcribing audio…")
+            self.status.emit(t("status_transcribing"))
             _logger.info("TranscribeWorker: model=%s, audio=%s", self.whisper_model, self.audio_path)
-            t = Transcriber(self.whisper_model)
-            text = t.transcribe(self.audio_path)
+            tr = Transcriber(self.whisper_model)
+            text = tr.transcribe(self.audio_path)
             _logger.info("TranscribeWorker: done, %d chars", len(text))
             self.finished.emit(text)
         except Exception as e:
@@ -433,7 +434,7 @@ class SummarizeWorker(QThread):
 
     def run(self):
         try:
-            self.status.emit("Generating summary…")
+            self.status.emit(t("status_summarizing"))
             _logger.info("SummarizeWorker: context=%s, profile=%s, transcript_len=%d",
                          self.context_name, self.profile_name, len(self.transcript))
             result = summarize(
@@ -650,12 +651,12 @@ class _ModelRow(QWidget):
         self.status_label = QLabel()
         lay.addWidget(self.status_label)
 
-        self.dl_btn = QPushButton("Download")
+        self.dl_btn = QPushButton(t("model_download"))
         self.dl_btn.setFixedWidth(80)
         self.dl_btn.clicked.connect(lambda: self.download_requested.emit(self.model_name))
         lay.addWidget(self.dl_btn)
 
-        self.del_btn = QPushButton("Delete")
+        self.del_btn = QPushButton(t("model_delete"))
         self.del_btn.setFixedWidth(56)
         self.del_btn.setStyleSheet("color: #cc3333;")
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.model_name))
@@ -672,13 +673,13 @@ class _ModelRow(QWidget):
 
     def _set_downloaded(self, downloaded: bool):
         if downloaded:
-            self.status_label.setText("Ready")
+            self.status_label.setText(t("model_ready"))
             self.status_label.setStyleSheet("color: #2d8a4e; font-weight: bold;")
             self.dl_btn.setVisible(False)
             self.del_btn.setVisible(True)
             self.progress_bar.setVisible(False)
         else:
-            self.status_label.setText("Not downloaded")
+            self.status_label.setText(t("not_downloaded"))
             self.status_label.setStyleSheet("color: #888;")
             self.dl_btn.setVisible(True)
             self.del_btn.setVisible(False)
@@ -687,7 +688,7 @@ class _ModelRow(QWidget):
         self.dl_btn.setVisible(False)
         self.del_btn.setVisible(False)
         self.progress_bar.setVisible(True)
-        self.status_label.setText("Downloading…")
+        self.status_label.setText(t("model_downloading"))
         self.status_label.setStyleSheet("color: #b08800;")
 
     def set_download_done(self):
@@ -698,122 +699,328 @@ class _ModelRow(QWidget):
         self.progress_bar.setVisible(False)
         self.dl_btn.setVisible(True)
         self.del_btn.setVisible(False)
-        self.status_label.setText("Error")
+        self.status_label.setText(t("model_error"))
         self.status_label.setStyleSheet("color: #cc3333;")
         self.status_label.setToolTip(msg)
 
 
-class QuickSetupDialog(QDialog):
-    """First-run setup wizard: prompt for a Gemini API key."""
+class SetupWizard(QDialog):
+    """Multi-step first-run setup wizard."""
+
+    _CARD_STYLE = """
+        QPushButton {{
+            background: {bg};
+            border: 2px solid {border};
+            border-radius: 12px;
+            padding: 18px 16px;
+            text-align: left;
+            font-size: 13px;
+        }}
+        QPushButton:hover {{
+            border-color: {hover};
+            background: {hover_bg};
+        }}
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Welcome to Summarizer")
-        self.setFixedWidth(460)
+        self.setWindowTitle(t("wizard_title"))
+        self.setMinimumWidth(500)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
-        root = QVBoxLayout(self)
-        root.setSpacing(16)
-        root.setContentsMargins(28, 28, 28, 24)
+        self._choice_cloud = True
+        self._selected_local_model = "gpt-oss:20b"
 
-        # Icon + title row
+        from PyQt6.QtWidgets import QStackedWidget
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._stack = QStackedWidget()
+        outer.addWidget(self._stack)
+
+        self._stack.addWidget(self._build_step1())    # 0 — cloud vs local
+        self._stack.addWidget(self._build_step2a())    # 1 — cloud API key
+        self._stack.addWidget(self._build_step2b())    # 2 — local model
+        self._stack.addWidget(self._build_step3())     # 3 — use case
+
+    # ── shared helpers ────────────────────────────────────────────────
+
+    def _header(self, layout: QVBoxLayout, title_text: str = "", sub_text: str = ""):
         icon_path = Path(__file__).parent / "icon.png"
         if icon_path.exists():
-            icon_lbl = QLabel()
-            pm = QPixmap(str(icon_path)).scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio,
+            lbl = QLabel()
+            pm = QPixmap(str(icon_path)).scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio,
                                                 Qt.TransformationMode.SmoothTransformation)
-            icon_lbl.setPixmap(pm)
-            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            root.addWidget(icon_lbl)
+            lbl.setPixmap(pm)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(lbl)
+        if title_text:
+            tl = QLabel(title_text)
+            tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tl.setStyleSheet(f"font-size: 19px; font-weight: 700; color: {_C['primary']};")
+            layout.addWidget(tl)
+        if sub_text:
+            sl = QLabel(sub_text)
+            sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            sl.setWordWrap(True)
+            sl.setStyleSheet(f"font-size: 13px; color: {_C['text_secondary']};")
+            layout.addWidget(sl)
 
-        title = QLabel("Welcome to Summarizer")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {_C['primary']};")
-        root.addWidget(title)
+    def _sep(self, layout: QVBoxLayout):
+        s = QWidget()
+        s.setFixedHeight(1)
+        s.setStyleSheet("background: #D1D1D6;")
+        layout.addWidget(s)
 
-        sub = QLabel("Let's set up your AI model to get started.")
-        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet(f"font-size: 13px; color: {_C['text_secondary']};")
-        root.addWidget(sub)
+    def _nav_row(self, layout: QVBoxLayout, back=False, next_text="", next_cb=None,
+                 skip=False, skip_cb=None, next_enabled=True):
+        row = QHBoxLayout()
+        if skip:
+            sb = QPushButton(t("wizard_skip"))
+            sb.setStyleSheet(
+                f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+                " font-size: 13px; padding: 8px 16px; }}"
+                f" QPushButton:hover {{ color: {_C['text']}; }}"
+            )
+            sb.clicked.connect(skip_cb or self.reject)
+            row.addWidget(sb)
+        if back:
+            bb = QPushButton(t("wizard_back"))
+            bb.setStyleSheet(
+                f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+                " font-size: 13px; padding: 8px 16px; }}"
+                f" QPushButton:hover {{ color: {_C['text']}; }}"
+            )
+            bb.clicked.connect(lambda: self._stack.setCurrentIndex(0))
+            row.addWidget(bb)
+        row.addStretch()
+        if next_text:
+            nb = QPushButton(next_text)
+            nb.setMinimumHeight(36)
+            nb.setMinimumWidth(120)
+            nb.setStyleSheet(_BTN_PRIMARY)
+            nb.setEnabled(next_enabled)
+            if next_cb:
+                nb.clicked.connect(next_cb)
+            row.addWidget(nb)
+            self._last_next_btn = nb
+        layout.addLayout(row)
 
-        # Separator
-        sep = QWidget()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet("background: #D1D1D6;")
-        root.addWidget(sep)
+    # ── Step 1: Cloud vs Local ────────────────────────────────────────
 
-        # Gemini key section
-        gemini_lbl = QLabel("Gemini API Key  <span style='color:#6e6e73; font-weight:400;'>(recommended — free)</span>")
+    def _build_step1(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(14)
+        lay.setContentsMargins(28, 24, 28, 20)
+
+        self._header(lay, t("wizard_title"), t("wizard_subtitle"))
+        self._sep(lay)
+        lay.addSpacing(4)
+
+        # Cloud card
+        cloud_btn = QPushButton()
+        cloud_btn.setStyleSheet(self._CARD_STYLE.format(
+            bg="white", border=_C["border"], hover=_C["primary"], hover_bg="rgba(74,144,217,0.05)"))
+        cloud_lay = QVBoxLayout(cloud_btn)
+        cloud_lay.setContentsMargins(4, 4, 4, 4)
+        ct = QLabel(f"☁️  <b>{t('wizard_cloud_title')}</b>")
+        ct.setStyleSheet("font-size: 15px; background: transparent;")
+        cloud_lay.addWidget(ct)
+        cd = QLabel(t("wizard_cloud_desc"))
+        cd.setWordWrap(True)
+        cd.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
+        cloud_lay.addWidget(cd)
+        cloud_btn.clicked.connect(lambda: self._on_type_choice(True))
+        lay.addWidget(cloud_btn)
+
+        # Local card
+        local_btn = QPushButton()
+        local_btn.setStyleSheet(self._CARD_STYLE.format(
+            bg="white", border=_C["border"], hover=_C["accent"], hover_bg="rgba(123,104,238,0.05)"))
+        local_lay = QVBoxLayout(local_btn)
+        local_lay.setContentsMargins(4, 4, 4, 4)
+        lt = QLabel(f"⚡  <b>{t('wizard_local_title')}</b>")
+        lt.setStyleSheet("font-size: 15px; background: transparent;")
+        local_lay.addWidget(lt)
+        ld = QLabel(t("wizard_local_desc"))
+        ld.setWordWrap(True)
+        ld.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
+        local_lay.addWidget(ld)
+        local_btn.clicked.connect(lambda: self._on_type_choice(False))
+        lay.addWidget(local_btn)
+
+        lay.addStretch()
+        self._nav_row(lay, skip=True)
+        return page
+
+    def _on_type_choice(self, cloud: bool):
+        self._choice_cloud = cloud
+        self._stack.setCurrentIndex(1 if cloud else 2)
+
+    # ── Step 2a: Cloud API key ────────────────────────────────────────
+
+    def _build_step2a(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(14)
+        lay.setContentsMargins(28, 24, 28, 20)
+
+        self._header(lay, t("wizard_cloud_step_title"))
+        self._sep(lay)
+
+        gemini_lbl = QLabel(t("wizard_gemini_label"))
         gemini_lbl.setStyleSheet("font-size: 13px; font-weight: 600;")
-        root.addWidget(gemini_lbl)
+        lay.addWidget(gemini_lbl)
 
         self._key_input = QLineEdit()
-        self._key_input.setPlaceholderText("Paste your Gemini API key here…")
+        self._key_input.setPlaceholderText(t("wizard_key_placeholder"))
         self._key_input.setMinimumHeight(36)
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        root.addWidget(self._key_input)
+        lay.addWidget(self._key_input)
 
-        hint = QLabel(
-            'Get a free key at <a href="https://aistudio.google.com/apikey" '
-            f'style="color:{_C["primary"]};">aistudio.google.com/apikey</a>'
-        )
+        hint = QLabel(t("wizard_key_hint", color=_C["primary"]))
         hint.setOpenExternalLinks(True)
         hint.setStyleSheet("font-size: 11px;")
-        root.addWidget(hint)
+        lay.addWidget(hint)
 
-        # Offline note
-        offline_box = QWidget()
-        offline_box.setStyleSheet(
-            f"background: rgba(74,144,217,0.07); border-radius: 6px;"
-        )
-        ob_lay = QHBoxLayout(offline_box)
-        ob_lay.setContentsMargins(12, 8, 12, 8)
-        ob_lbl = QLabel(
-            "No API key? You can also use <b>local models</b> (fully offline) — "
-            "download them later in Settings → Models."
-        )
-        ob_lbl.setWordWrap(True)
-        ob_lbl.setStyleSheet("font-size: 11px; background: transparent;")
-        ob_lay.addWidget(ob_lbl)
-        root.addWidget(offline_box)
+        lay.addStretch()
+        self._nav_row(lay, back=True, next_text=t("wizard_next"),
+                      next_cb=self._on_cloud_next, next_enabled=False)
+        self._cloud_next_btn = self._last_next_btn
+        self._key_input.textChanged.connect(
+            lambda: self._cloud_next_btn.setEnabled(bool(self._key_input.text().strip())))
+        return page
 
-        root.addSpacing(4)
-
-        # Buttons
-        btn_row = QHBoxLayout()
-        skip_btn = QPushButton("Skip for now")
-        skip_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
-            " font-size: 13px; padding: 8px 16px; }}"
-            f" QPushButton:hover {{ color: {_C['text']}; }}"
-        )
-        skip_btn.clicked.connect(self.reject)
-        btn_row.addWidget(skip_btn)
-        btn_row.addStretch()
-
-        self._save_btn = QPushButton("Save && Start")
-        self._save_btn.setMinimumHeight(36)
-        self._save_btn.setMinimumWidth(120)
-        self._save_btn.setStyleSheet(_BTN_PRIMARY)
-        self._save_btn.clicked.connect(self._save)
-        btn_row.addWidget(self._save_btn)
-        root.addLayout(btn_row)
-
-        self._key_input.textChanged.connect(self._on_key_changed)
-        self._on_key_changed()
-
-    def _on_key_changed(self):
-        self._save_btn.setEnabled(bool(self._key_input.text().strip()))
-
-    def _save(self):
+    def _on_cloud_next(self):
         key = self._key_input.text().strip()
         if not key:
             return
         cfg = config.load()
         cfg["api_key"] = key
-        # Ensure Gemini Flash is the default model if none set
         if not cfg.get("model"):
             cfg["model"] = "gemini-3-flash-preview"
+        config.save(cfg)
+        self._stack.setCurrentIndex(3)
+
+    # ── Step 2b: Local model selection ────────────────────────────────
+
+    def _build_step2b(self) -> QWidget:
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(12)
+        lay.setContentsMargins(28, 24, 28, 20)
+
+        self._header(lay, t("wizard_local_step_title"))
+        sub = QLabel(t("wizard_local_step_desc"))
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        lay.addWidget(sub)
+        self._sep(lay)
+
+        self._local_bg = QButtonGroup(self)
+        for key, info in config.LOCAL_LLM_MODELS.items():
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(8, 4, 8, 4)
+            rb = QRadioButton()
+            rb.setChecked(key == "gpt-oss:20b")
+            rb._model_key = key
+            self._local_bg.addButton(rb)
+            row_h.addWidget(rb)
+            disp = info["display"]
+            sz = info["size_gb"]
+            qual = info["quality"]
+            lbl_text = f"<b>{disp}</b>  —  {qual}  ({sz} GB)"
+            if key == "gpt-oss:20b":
+                color = _C["success"]
+                rec = t("wizard_recommended")
+                lbl_text += f"  <span style='color:{color}; font-size: 11px;'> ★ {rec}</span>"
+            lbl = QLabel(lbl_text)
+            row_h.addWidget(lbl, 1)
+            lay.addWidget(row_w)
+
+        lay.addStretch()
+        self._nav_row(lay, back=True, next_text=t("wizard_next"),
+                      next_cb=self._on_local_next)
+        return page
+
+    def _on_local_next(self):
+        for btn in self._local_bg.buttons():
+            if btn.isChecked():
+                self._selected_local_model = btn._model_key
+                break
+        cfg = config.load()
+        cfg["model"] = self._selected_local_model
+        config.save(cfg)
+        self._stack.setCurrentIndex(3)
+
+    # ── Step 3: Work vs General ───────────────────────────────────────
+
+    def _build_step3(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(14)
+        lay.setContentsMargins(28, 24, 28, 20)
+
+        self._header(lay, t("wizard_use_step_title"))
+        self._sep(lay)
+        lay.addSpacing(4)
+
+        work_btn = QPushButton()
+        work_btn.setStyleSheet(self._CARD_STYLE.format(
+            bg="white", border=_C["border"], hover=_C["primary"], hover_bg="rgba(74,144,217,0.05)"))
+        wl = QVBoxLayout(work_btn)
+        wl.setContentsMargins(4, 4, 4, 4)
+        wt = QLabel(f"💼  <b>{t('wizard_work_title')}</b>")
+        wt.setStyleSheet("font-size: 15px; background: transparent;")
+        wl.addWidget(wt)
+        wd = QLabel(t("wizard_work_desc"))
+        wd.setWordWrap(True)
+        wd.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
+        wl.addWidget(wd)
+        work_btn.clicked.connect(lambda: self._on_use_choice("work"))
+        lay.addWidget(work_btn)
+
+        gen_btn = QPushButton()
+        gen_btn.setStyleSheet(self._CARD_STYLE.format(
+            bg="white", border=_C["border"], hover=_C["accent"], hover_bg="rgba(123,104,238,0.05)"))
+        gl = QVBoxLayout(gen_btn)
+        gl.setContentsMargins(4, 4, 4, 4)
+        gt = QLabel(f"🗣️  <b>{t('wizard_general_title')}</b>")
+        gt.setStyleSheet("font-size: 15px; background: transparent;")
+        gl.addWidget(gt)
+        gd = QLabel(t("wizard_general_desc"))
+        gd.setWordWrap(True)
+        gd.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
+        gl.addWidget(gd)
+        gen_btn.clicked.connect(lambda: self._on_use_choice("general"))
+        lay.addWidget(gen_btn)
+
+        lay.addStretch()
+        return page
+
+    def _on_use_choice(self, kind: str):
+        cfg = config.load()
+        profiles = cfg.get("instruction_profiles", {})
+
+        work_name = t("profile_work")
+        general_name = t("profile_general")
+
+        work_instr = config.get_default_instructions()
+        general_instr = config.get_general_instructions()
+
+        profiles[work_name] = work_instr
+        profiles[general_name] = general_instr
+
+        if kind == "work":
+            cfg["active_profile"] = work_name
+            cfg["instructions"] = work_instr
+        else:
+            cfg["active_profile"] = general_name
+            cfg["instructions"] = general_instr
+
+        cfg["instruction_profiles"] = profiles
         config.save(cfg)
         self.accept()
 
@@ -856,7 +1063,7 @@ class OllamaChatDialog(QDialog):
 
     def __init__(self, model_key: str, display_name: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Test — {display_name}")
+        self.setWindowTitle(t("chat_title", name=display_name))
         self.resize(480, 420)
         self._model = model_key
         self._messages: list[dict] = []
@@ -866,16 +1073,16 @@ class OllamaChatDialog(QDialog):
 
         self._chat_view = QTextEdit()
         self._chat_view.setReadOnly(True)
-        self._chat_view.setPlaceholderText("Send a message to start chatting…")
+        self._chat_view.setPlaceholderText(t("chat_placeholder"))
         vlay.addWidget(self._chat_view, 1)
 
         hlay = QHBoxLayout()
         self._input = QLineEdit()
-        self._input.setPlaceholderText("Type a message…")
+        self._input.setPlaceholderText(t("chat_placeholder"))
         self._input.returnPressed.connect(self._send)
         hlay.addWidget(self._input, 1)
 
-        self._send_btn = QPushButton("Send")
+        self._send_btn = QPushButton(t("chat_send"))
         self._send_btn.setFixedWidth(60)
         self._send_btn.setStyleSheet(
             f"background: {_C['primary']}; color: white; border: none; border-radius: 4px; padding: 4px 8px;"
@@ -963,20 +1170,20 @@ class _LocalLLMRow(QWidget):
             " QPushButton:pressed { background: rgba(0,0,0,0.12); }"
         )
 
-        self.test_btn = QPushButton("Test")
+        self.test_btn = QPushButton(t("model_test"))
         self.test_btn.setFixedWidth(44)
         self.test_btn.setStyleSheet(_flat_btn % _C["primary"])
         self.test_btn.clicked.connect(lambda: self.test_requested.emit(self.model_key))
         self.test_btn.setVisible(False)
         lay.addWidget(self.test_btn)
 
-        self.dl_btn = QPushButton("Download")
+        self.dl_btn = QPushButton(t("model_download"))
         self.dl_btn.setFixedWidth(76)
         self.dl_btn.setStyleSheet(_flat_btn % _C["primary"])
         self.dl_btn.clicked.connect(lambda: self.download_requested.emit(self.model_key))
         lay.addWidget(self.dl_btn)
 
-        self.del_btn = QPushButton("Delete")
+        self.del_btn = QPushButton(t("model_delete"))
         self.del_btn.setFixedWidth(56)
         self.del_btn.setStyleSheet(_flat_btn % "#cc3333")
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.model_key))
@@ -993,14 +1200,14 @@ class _LocalLLMRow(QWidget):
 
     def _set_downloaded(self, downloaded: bool):
         if downloaded:
-            self.status_label.setText("Ready")
+            self.status_label.setText(t("model_ready"))
             self.status_label.setStyleSheet("color: #2d8a4e; font-weight: bold;")
             self.dl_btn.setVisible(False)
             self.del_btn.setVisible(True)
             self.test_btn.setVisible(True)
             self.progress_bar.setVisible(False)
         else:
-            self.status_label.setText("Not downloaded")
+            self.status_label.setText(t("not_downloaded"))
             self.status_label.setStyleSheet("color: #888;")
             self.dl_btn.setVisible(True)
             self.del_btn.setVisible(False)
@@ -1011,7 +1218,7 @@ class _LocalLLMRow(QWidget):
         self.del_btn.setVisible(False)
         self.test_btn.setVisible(False)
         self.progress_bar.setVisible(True)
-        self.status_label.setText("Downloading…")
+        self.status_label.setText(t("model_pulling"))
         self.status_label.setStyleSheet("color: #b08800;")
 
     def set_pull_done(self):
@@ -1023,7 +1230,7 @@ class _LocalLLMRow(QWidget):
         self.dl_btn.setVisible(True)
         self.del_btn.setVisible(False)
         self.test_btn.setVisible(False)
-        self.status_label.setText("Error")
+        self.status_label.setText(t("model_error"))
         self.status_label.setStyleSheet("color: #cc3333;")
         self.status_label.setToolTip(msg)
 
@@ -1031,7 +1238,7 @@ class _LocalLLMRow(QWidget):
 class SettingsDialog(QDialog):
     def __init__(self, parent=None, bg_whisper: dict = None, bg_llm: dict = None):
         super().__init__(parent)
-        self.setWindowTitle("Settings")
+        self.setWindowTitle(t("settings_title"))
         self.setMinimumWidth(580)
         self.setMinimumHeight(720)
         self.cfg = config.load()
@@ -1100,14 +1307,14 @@ class SettingsDialog(QDialog):
         models_vlay.setSpacing(10)
 
         # AI Model group
-        llm_group = QGroupBox("AI Model")
+        llm_group = QGroupBox(t("ai_model_group"))
         llm_vlay = QVBoxLayout(llm_group)
         llm_vlay.setSpacing(2)
 
         self._all_model_radio_group = QButtonGroup(self)
         current_model = self.cfg.get("model", "")
 
-        cloud_lbl = QLabel("☁  Cloud")
+        cloud_lbl = QLabel(t("cloud_label"))
         cloud_lbl.setStyleSheet("color: #6e6e73; font-size: 11px; font-weight: bold; margin-top: 4px;")
         llm_vlay.addWidget(cloud_lbl)
 
@@ -1126,11 +1333,11 @@ class SettingsDialog(QDialog):
         custom_row_w = QWidget()
         custom_row_h = QHBoxLayout(custom_row_w)
         custom_row_h.setContentsMargins(12, 1, 4, 1)
-        self._custom_rb = QRadioButton("Custom:")
+        self._custom_rb = QRadioButton(t("custom_label"))
         self._all_model_radio_group.addButton(self._custom_rb)
         custom_row_h.addWidget(self._custom_rb)
         self.model_edit = QLineEdit()
-        self.model_edit.setPlaceholderText("model name…")
+        self.model_edit.setPlaceholderText(t("model_placeholder"))
         self.model_edit.setFixedHeight(22)
         custom_row_h.addWidget(self.model_edit, 1)
         llm_vlay.addWidget(custom_row_w)
@@ -1149,25 +1356,25 @@ class SettingsDialog(QDialog):
         creds_w = QWidget()
         creds_h = QHBoxLayout(creds_w)
         creds_h.setContentsMargins(12, 6, 4, 4)
-        creds_h.addWidget(QLabel("API Key:"))
+        creds_h.addWidget(QLabel(t("api_key_label")))
         self.key_edit = QLineEdit(self.cfg.get("api_key", ""))
         self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.key_edit.setPlaceholderText("your API key")
+        self.key_edit.setPlaceholderText(t("api_key_placeholder"))
         creds_h.addWidget(self.key_edit, 2)
-        creds_h.addWidget(QLabel("Base URL:"))
+        creds_h.addWidget(QLabel(t("base_url_label")))
         self.base_url_edit = QLineEdit(self.cfg.get("base_url", ""))
-        self.base_url_edit.setPlaceholderText("(optional)")
+        self.base_url_edit.setPlaceholderText(t("base_url_placeholder"))
         creds_h.addWidget(self.base_url_edit, 2)
         llm_vlay.addWidget(creds_w)
 
         # Local (Ollama) sub-section
-        local_lbl = QLabel("⚡  Local (Ollama)")
+        local_lbl = QLabel(t("local_label"))
         local_lbl.setStyleSheet("color: #6e6e73; font-size: 11px; font-weight: bold; margin-top: 6px;")
         llm_vlay.addWidget(local_lbl)
 
         ollama_ok = config.is_ollama_available()
         if not ollama_ok:
-            hint = QLabel("Ollama not found — click Download to auto-install, or visit <a href='https://ollama.com'>ollama.com</a>")
+            hint = QLabel(t("ollama_not_found"))
             hint.setOpenExternalLinks(True)
             hint.setStyleSheet("color: #888; font-size: 10px; margin-left: 12px;")
             llm_vlay.addWidget(hint)
@@ -1186,7 +1393,7 @@ class SettingsDialog(QDialog):
         models_vlay.addWidget(llm_group)
 
         # Whisper model group
-        whisper_group = QGroupBox("Whisper Model (speech recognition)")
+        whisper_group = QGroupBox(t("whisper_group"))
         whisper_lay = QVBoxLayout(whisper_group)
         current_wm = self.cfg.get("whisper_model", "base")
         if not config.is_model_downloaded(current_wm):
@@ -1208,7 +1415,7 @@ class SettingsDialog(QDialog):
         models_vlay.addWidget(whisper_group)
         models_vlay.addStretch()
         models_scroll.setWidget(models_inner)
-        tabs.addTab(models_scroll, "Models")
+        tabs.addTab(models_scroll, t("tab_models"))
 
         # ── TAB: Instructions ─────────────────────────────────────────────
         instr_tab = QWidget()
@@ -1223,12 +1430,12 @@ class SettingsDialog(QDialog):
         self.profile_combo.currentIndexChanged.connect(self._on_profile_selected)
         profile_row.addWidget(self.profile_combo, 1)
 
-        new_profile_btn = QPushButton("New")
+        new_profile_btn = QPushButton(t("new_btn"))
         new_profile_btn.setFixedWidth(50)
         new_profile_btn.clicked.connect(self._new_profile)
         profile_row.addWidget(new_profile_btn)
 
-        self.del_profile_btn = QPushButton("Delete")
+        self.del_profile_btn = QPushButton(t("delete_btn"))
         self.del_profile_btn.setFixedWidth(56)
         self.del_profile_btn.clicked.connect(self._delete_profile)
         profile_row.addWidget(self.del_profile_btn)
@@ -1237,10 +1444,10 @@ class SettingsDialog(QDialog):
         active_profile = self.cfg.get("active_profile", config.DEFAULT_PROFILE_NAME)
         self.instructions_edit = QTextEdit()
         self.instructions_edit.setPlainText(config.get_profile(active_profile))
-        self.instructions_edit.setPlaceholderText("System instructions for the LLM agent…")
+        self.instructions_edit.setPlaceholderText(t("instructions_placeholder"))
         instr_outer.addWidget(self.instructions_edit, 1)
 
-        tabs.addTab(instr_tab, "Instructions")
+        tabs.addTab(instr_tab, t("tab_instructions"))
 
         # ── TAB: General ──────────────────────────────────────────────────
         general_tab = QWidget()
@@ -1253,16 +1460,16 @@ class SettingsDialog(QDialog):
         self.context_limit_spin.setSingleStep(500)
         self.context_limit_spin.setValue(int(self.cfg.get("context_limit", 5000)))
         self.context_limit_spin.setSuffix(" chars")
-        general_form.addRow("Context Limit:", self.context_limit_spin)
+        general_form.addRow(t("context_limit_label"), self.context_limit_spin)
 
         self.silence_spin = QSpinBox()
         self.silence_spin.setRange(5, 300)
         self.silence_spin.setValue(int(self.cfg.get("silence_timeout", 30)))
         self.silence_spin.setSuffix(" sec")
-        general_form.addRow("Silence Timeout:", self.silence_spin)
+        general_form.addRow(t("silence_timeout_label"), self.silence_spin)
 
         self.device_combo = QComboBox()
-        self.device_combo.addItem("Default", None)
+        self.device_combo.addItem(t("device_default"), None)
         for dev in AudioRecorder.list_devices():
             self.device_combo.addItem(dev["name"], dev["id"])
         saved_dev = self.cfg.get("input_device")
@@ -1271,34 +1478,34 @@ class SettingsDialog(QDialog):
                 if self.device_combo.itemData(i) == saved_dev:
                     self.device_combo.setCurrentIndex(i)
                     break
-        general_form.addRow("Input Device:", self.device_combo)
+        general_form.addRow(t("input_device_label"), self.device_combo)
 
-        self.save_audio_check = QCheckBox("Save recorded audio files to recordings dir")
+        self.save_audio_check = QCheckBox(t("save_audio_check"))
         self.save_audio_check.setChecked(bool(self.cfg.get("save_audio", False)))
-        general_form.addRow("Save Audio:", self.save_audio_check)
+        general_form.addRow(t("save_audio_label"), self.save_audio_check)
 
-        self.transcribe_only_check = QCheckBox("Transcribe only (no summarization)")
+        self.transcribe_only_check = QCheckBox(t("transcribe_only_check"))
         self.transcribe_only_check.setChecked(bool(self.cfg.get("transcribe_only", False)))
-        general_form.addRow("Mode:", self.transcribe_only_check)
+        general_form.addRow(t("mode_label"), self.transcribe_only_check)
 
-        self.sound_on_done_check = QCheckBox("Play sound when done")
+        self.sound_on_done_check = QCheckBox(t("sound_check"))
         self.sound_on_done_check.setChecked(bool(self.cfg.get("sound_on_done", True)))
-        general_form.addRow("Sound:", self.sound_on_done_check)
+        general_form.addRow(t("sound_label"), self.sound_on_done_check)
 
         self.recordings_edit = QLineEdit(self.cfg.get("recordings_dir", ""))
-        self.recordings_edit.setPlaceholderText("(default: ~/.summarizer/recordings)")
-        general_form.addRow("Recordings Dir:", self.recordings_edit)
+        self.recordings_edit.setPlaceholderText(t("recordings_dir_placeholder"))
+        general_form.addRow(t("recordings_dir_label"), self.recordings_edit)
 
-        logs_btn = QPushButton("Open Log File")
+        logs_btn = QPushButton(t("open_log"))
         logs_btn.setToolTip(str(config.get_log_path()))
         logs_btn.clicked.connect(self._open_logs)
-        general_form.addRow("Diagnostics:", logs_btn)
+        general_form.addRow(t("diagnostics_label"), logs_btn)
 
         update_row = QHBoxLayout()
         version_label = QLabel(f"v{config.APP_VERSION}")
         version_label.setStyleSheet("color: #888; font-size: 12px;")
         update_row.addWidget(version_label)
-        self._update_btn = QPushButton("Check for Updates")
+        self._update_btn = QPushButton(t("check_updates"))
         self._update_btn.clicked.connect(self._check_for_updates)
         update_row.addWidget(self._update_btn)
         self._update_progress = QProgressBar()
@@ -1306,15 +1513,15 @@ class SettingsDialog(QDialog):
         self._update_progress.setVisible(False)
         update_row.addWidget(self._update_progress)
         update_row.addStretch()
-        general_form.addRow("Version:", update_row)
+        general_form.addRow(t("version_label"), update_row)
 
-        tabs.addTab(general_tab, "General")
+        tabs.addTab(general_tab, t("tab_general"))
 
         # ── Save / Cancel row ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton(t("save_btn"))
         save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton(t("cancel_btn"))
         cancel_btn.clicked.connect(self.reject)
         btn_row.addStretch()
         btn_row.addWidget(save_btn)
@@ -1324,7 +1531,7 @@ class SettingsDialog(QDialog):
     def _open_logs(self):
         log_path = config.get_log_path()
         if not log_path.exists():
-            QMessageBox.information(self, "Logs", "No log file yet — run the app first.")
+            QMessageBox.information(self, t("logs_title"), t("logs_no_file"))
             return
         from PyQt6.QtGui import QDesktopServices
         from PyQt6.QtCore import QUrl
@@ -1332,7 +1539,7 @@ class SettingsDialog(QDialog):
 
     def _check_for_updates(self):
         self._update_btn.setEnabled(False)
-        self._update_btn.setText("Checking…")
+        self._update_btn.setText(t("checking_updates"))
         worker = UpdateCheckWorker()
         worker.update_available.connect(self._on_update_available)
         worker.no_update.connect(self._on_no_update)
@@ -1341,31 +1548,31 @@ class SettingsDialog(QDialog):
         worker.start()
 
     def _on_update_available(self, info: dict):
-        self._update_btn.setText("Check for Updates")
+        self._update_btn.setText(t("check_updates"))
         self._update_btn.setEnabled(True)
         tag = info["tag"]
         notes = info.get("notes", "")
         preview = notes[:300] + "…" if len(notes) > 300 else notes
-        msg = f"A new version {tag} is available.\n\n{preview}\n\nDownload now?"
-        reply = QMessageBox.question(self, "Update Available", msg,
+        msg = t("update_available_msg", tag=tag, notes=preview)
+        reply = QMessageBox.question(self, t("update_available_title"), msg,
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             self._start_download(info["dmg_url"])
 
     def _on_no_update(self):
-        self._update_btn.setText("Check for Updates")
+        self._update_btn.setText(t("check_updates"))
         self._update_btn.setEnabled(True)
-        QMessageBox.information(self, "Up to Date",
-                                f"You are running the latest version (v{config.APP_VERSION}).")
+        QMessageBox.information(self, t("up_to_date_title"),
+                                t("up_to_date_msg", version=config.APP_VERSION))
 
     def _on_update_error(self, msg: str):
-        self._update_btn.setText("Check for Updates")
+        self._update_btn.setText(t("check_updates"))
         self._update_btn.setEnabled(True)
-        QMessageBox.warning(self, "Update Check Failed", msg)
+        QMessageBox.warning(self, t("update_check_failed"), msg)
 
     def _start_download(self, dmg_url: str):
         self._update_btn.setEnabled(False)
-        self._update_btn.setText("Downloading…")
+        self._update_btn.setText(t("downloading_update"))
         self._update_progress.setValue(0)
         self._update_progress.setVisible(True)
         worker = UpdateDownloadWorker(dmg_url)
@@ -1377,29 +1584,24 @@ class SettingsDialog(QDialog):
 
     def _on_update_download_finished(self):
         self._update_progress.setVisible(False)
-        self._update_btn.setText("Check for Updates")
+        self._update_btn.setText(t("check_updates"))
         self._update_btn.setEnabled(True)
 
         from pathlib import Path
         dmg_path = Path.home() / "Downloads" / "Summarizer.dmg"
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("Update Ready")
+        dlg.setWindowTitle(t("update_ready_title"))
         dlg.setFixedWidth(400)
         lay = QVBoxLayout(dlg)
         lay.setSpacing(12)
         lay.setContentsMargins(24, 20, 24, 20)
 
-        title_lbl = QLabel("New version downloaded!")
+        title_lbl = QLabel(t("update_ready_msg"))
         title_lbl.setStyleSheet("font-size: 15px; font-weight: 700;")
         lay.addWidget(title_lbl)
 
-        info_lbl = QLabel(
-            "To install:\n"
-            "1. Click \"Quit & Open DMG\" below\n"
-            "2. Drag Summarizer to Applications\n"
-            "3. Launch Summarizer from Applications"
-        )
+        info_lbl = QLabel(t("update_install_instructions"))
         info_lbl.setWordWrap(True)
         info_lbl.setStyleSheet("font-size: 13px;")
         lay.addWidget(info_lbl)
@@ -1407,7 +1609,7 @@ class SettingsDialog(QDialog):
         lay.addSpacing(4)
 
         btn_row = QHBoxLayout()
-        later_btn = QPushButton("Later")
+        later_btn = QPushButton(t("later_btn"))
         later_btn.setStyleSheet(
             "QPushButton { background: transparent; border: none;"
             f" color: {_C['text_secondary']}; font-size: 13px; padding: 8px 14px; }}"
@@ -1417,7 +1619,7 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(later_btn)
         btn_row.addStretch()
 
-        quit_btn = QPushButton("Quit & Open DMG")
+        quit_btn = QPushButton(t("quit_open_dmg"))
         quit_btn.setMinimumHeight(34)
         quit_btn.setStyleSheet(_BTN_PRIMARY)
         quit_btn.clicked.connect(dlg.accept)
@@ -1431,9 +1633,9 @@ class SettingsDialog(QDialog):
 
     def _on_update_download_error(self, msg: str):
         self._update_progress.setVisible(False)
-        self._update_btn.setText("Check for Updates")
+        self._update_btn.setText(t("check_updates"))
         self._update_btn.setEnabled(True)
-        QMessageBox.warning(self, "Download Failed", msg)
+        QMessageBox.warning(self, t("download_failed"), msg)
 
     def _reload_profile_combo(self):
         self.profile_combo.blockSignals(True)
@@ -1471,7 +1673,7 @@ class SettingsDialog(QDialog):
 
     def _new_profile(self):
         from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New Profile", "Profile name:")
+        name, ok = QInputDialog.getText(self, t("new_profile_title"), t("new_profile_prompt"))
         if not ok or not name.strip():
             return
         name = name.strip()
@@ -1488,8 +1690,8 @@ class SettingsDialog(QDialog):
         if not name or name == config.DEFAULT_PROFILE_NAME:
             return
         answer = QMessageBox.question(
-            self, "Delete Profile",
-            f"Delete profile «{name}»?",
+            self, t("delete_profile_title"),
+            t("delete_profile_confirm", name=name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
@@ -1554,13 +1756,13 @@ class SettingsDialog(QDialog):
     def _delete_whisper_model(self, model_name: str):
         if config.is_model_bundled(model_name):
             QMessageBox.information(
-                self, "Bundled Model",
-                f"'{model_name}' is bundled with the app and cannot be deleted.",
+                self, t("bundled_model_title"),
+                t("bundled_model_msg", name=model_name),
             )
             return
         answer = QMessageBox.question(
-            self, "Delete Whisper Model",
-            f"Delete '{model_name}' model files from disk?",
+            self, t("delete_whisper_title"),
+            t("delete_whisper_confirm", name=model_name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
@@ -1568,7 +1770,7 @@ class SettingsDialog(QDialog):
         try:
             config.delete_whisper_model(model_name)
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            QMessageBox.critical(self, t("error_title"), str(e))
             return
         row = self._model_rows.get(model_name)
         if row:
@@ -1587,14 +1789,10 @@ class SettingsDialog(QDialog):
     def _offer_ollama_install(self, pending_model_key: str):
         from PyQt6.QtGui import QDesktopServices
         msg = QMessageBox(self)
-        msg.setWindowTitle("Ollama Required")
-        msg.setText(
-            "Ollama is required for local models.\n\n"
-            "Auto-install (will install Homebrew too if needed)\n"
-            "or download manually from ollama.com."
-        )
-        brew_btn = msg.addButton("Auto Install", QMessageBox.ButtonRole.AcceptRole)
-        web_btn = msg.addButton("Open Download Page", QMessageBox.ButtonRole.HelpRole)
+        msg.setWindowTitle(t("ollama_required_title"))
+        msg.setText(t("ollama_required_msg"))
+        brew_btn = msg.addButton(t("auto_install_btn"), QMessageBox.ButtonRole.AcceptRole)
+        web_btn = msg.addButton(t("open_download_page"), QMessageBox.ButtonRole.HelpRole)
         msg.addButton(QMessageBox.StandardButton.Cancel)
         msg.exec()
 
@@ -1606,7 +1804,7 @@ class SettingsDialog(QDialog):
             )
             self._install_ollama_worker.finished.connect(self._on_ollama_installed)
             self._install_ollama_worker.error.connect(self._on_ollama_install_error)
-            self._set_ollama_install_hint("Installing Ollama…")
+            self._set_ollama_install_hint(t("installing_ollama"))
             self._install_ollama_worker.start()
         elif msg.clickedButton() == web_btn:
             QDesktopServices.openUrl(QUrl("https://ollama.com/download"))
@@ -1618,7 +1816,7 @@ class SettingsDialog(QDialog):
 
     def _on_ollama_installed(self):
         for row in self._local_llm_rows.values():
-            row.status_label.setText("Ollama ready")
+            row.status_label.setText(t("ollama_ready"))
             row.status_label.setStyleSheet("color: #2d8a4e; font-weight: bold;")
         pending = getattr(self, "_pending_pull_model", None)
         if pending:
@@ -1627,9 +1825,9 @@ class SettingsDialog(QDialog):
 
     def _on_ollama_install_error(self, msg: str):
         for row in self._local_llm_rows.values():
-            row.status_label.setText("Not downloaded")
+            row.status_label.setText(t("not_downloaded"))
             row.status_label.setStyleSheet("color: #888;")
-        QMessageBox.critical(self, "Ollama Install Failed", msg)
+        QMessageBox.critical(self, t("ollama_install_failed"), msg)
 
     def _do_pull_local_llm(self, model_key: str):
         row = self._local_llm_rows.get(model_key)
@@ -1657,14 +1855,14 @@ class SettingsDialog(QDialog):
         row = self._local_llm_rows.get(model_key)
         if row:
             row.set_pull_error(msg)
-        QMessageBox.critical(self, "Local Model Error", msg)
+        QMessageBox.critical(self, t("local_model_error"), msg)
 
     def _delete_local_llm(self, model_key: str):
         info = config.LOCAL_LLM_MODELS.get(model_key, {})
         name = info.get("display", model_key)
         answer = QMessageBox.question(
-            self, "Delete Local Model",
-            f"Delete '{name}' from Ollama?",
+            self, t("delete_local_title"),
+            t("delete_local_confirm", name=name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
@@ -1685,10 +1883,8 @@ class SettingsDialog(QDialog):
         selected_wm = self._get_selected_whisper_model()
         if not config.is_model_downloaded(selected_wm):
             answer = QMessageBox.question(
-                self, "Model Not Downloaded",
-                f"'{selected_wm}' is not downloaded yet.\n"
-                "It will be downloaded automatically on first transcription.\n\n"
-                "Save anyway?",
+                self, t("model_not_downloaded_title"),
+                t("model_not_downloaded_msg", name=selected_wm),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if answer != QMessageBox.StandardButton.Yes:
@@ -1723,7 +1919,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Summarizer")
+        self.setWindowTitle(t("app_title"))
         self.setMinimumSize(560, 620)
         self.setAcceptDrops(True)
 
@@ -1776,7 +1972,7 @@ class MainWindow(QMainWindow):
         settings_btn.setIcon(_make_gear_icon(32, QColor(_C["accent"])))
         settings_btn.setIconSize(QSize(22, 22))
         settings_btn.setFixedSize(36, 36)
-        settings_btn.setToolTip("Settings")
+        settings_btn.setToolTip(t("settings_tooltip"))
         settings_btn.setStyleSheet("""
             QPushButton {
                 border: none;
@@ -1793,7 +1989,7 @@ class MainWindow(QMainWindow):
 
         # ── context section ──
         ctx_row = QHBoxLayout()
-        named_lbl = QLabel("Context:")
+        named_lbl = QLabel(t("context_label"))
         named_lbl.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
         ctx_row.addWidget(named_lbl)
         self.context_combo = QComboBox()
@@ -1802,7 +1998,7 @@ class MainWindow(QMainWindow):
         ctx_row.addWidget(self.context_combo, 1)
         add_ctx_btn = QPushButton("+")
         add_ctx_btn.setFixedSize(28, 28)
-        add_ctx_btn.setToolTip("Create new named context")
+        add_ctx_btn.setToolTip(t("context_add_tooltip"))
         add_ctx_btn.setStyleSheet(_BTN_SECONDARY + """
             QPushButton { font-size: 16px; font-weight: bold; padding: 0px; }
         """)
@@ -1811,7 +2007,7 @@ class MainWindow(QMainWindow):
 
         self._edit_ctx_btn = QPushButton("✏")
         self._edit_ctx_btn.setFixedSize(36, 36)
-        self._edit_ctx_btn.setToolTip("Edit context file in default editor")
+        self._edit_ctx_btn.setToolTip(t("context_edit_tooltip"))
         self._edit_ctx_btn.setStyleSheet(_BTN_SECONDARY + """
             QPushButton { font-size: 18px; padding: 0px; color: #b08800; }
         """)
@@ -1821,7 +2017,7 @@ class MainWindow(QMainWindow):
 
         self._del_ctx_btn = QPushButton("×")
         self._del_ctx_btn.setFixedSize(28, 28)
-        self._del_ctx_btn.setToolTip("Delete selected context")
+        self._del_ctx_btn.setToolTip(t("context_delete_tooltip"))
         self._del_ctx_btn.setStyleSheet(_BTN_SECONDARY + """
             QPushButton { font-size: 18px; font-weight: bold; padding: 0px; color: #cc3333; }
         """)
@@ -1831,13 +2027,13 @@ class MainWindow(QMainWindow):
         self.context_combo.currentIndexChanged.connect(self._on_context_combo_changed)
         root.addLayout(ctx_row)
 
-        self._gen_lbl = QLabel("General context")
+        self._gen_lbl = QLabel(t("general_context_label"))
         self._gen_lbl.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin: 0;")
         self._gen_lbl.setContentsMargins(0, 0, 0, 0)
         self._gen_lbl.setVisible(False)
         root.addWidget(self._gen_lbl)
         self.general_ctx = QTextEdit()
-        self.general_ctx.setPlaceholderText("Key info: meeting type, goals, usual participants, key terms…")
+        self.general_ctx.setPlaceholderText(t("general_context_placeholder"))
         self.general_ctx.setMinimumHeight(68)
         self.general_ctx.setMaximumHeight(90)
         self.general_ctx.setAcceptRichText(False)
@@ -1846,12 +2042,12 @@ class MainWindow(QMainWindow):
                                         QSizePolicy.Policy.Preferred)
         root.addWidget(self.general_ctx)
 
-        self._mtg_lbl = QLabel("This meeting context")
+        self._mtg_lbl = QLabel(t("meeting_context_label"))
         self._mtg_lbl.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin: 0;")
         self._mtg_lbl.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._mtg_lbl)
         self.meeting_ctx = QTextEdit()
-        self.meeting_ctx.setPlaceholderText("Agenda, attendees, specific details for this meeting…")
+        self.meeting_ctx.setPlaceholderText(t("meeting_context_placeholder"))
         self.meeting_ctx.setMinimumHeight(68)
         self.meeting_ctx.setMaximumHeight(90)
         self.meeting_ctx.setAcceptRichText(False)
@@ -1862,7 +2058,7 @@ class MainWindow(QMainWindow):
         # ── instructions profile row ──
         profile_row = QHBoxLayout()
         profile_row.setSpacing(6)
-        profile_lbl = QLabel("Instructions:")
+        profile_lbl = QLabel(t("instructions_label"))
         profile_lbl.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']};")
         profile_row.addWidget(profile_lbl)
         self.profile_select = QComboBox()
@@ -1877,7 +2073,7 @@ class MainWindow(QMainWindow):
         root.addSpacing(6)
         self._mic_icon = _make_mic_icon(48, QColor(_C["primary_text"]))
         self._stop_icon = _make_stop_icon(48)
-        self.record_btn = QPushButton("  Start Recording")
+        self.record_btn = QPushButton(t("start_recording"))
         self.record_btn.setIcon(self._mic_icon)
         self.record_btn.setIconSize(QSize(22, 22))
         self.record_btn.setMinimumHeight(50)
@@ -1888,10 +2084,10 @@ class MainWindow(QMainWindow):
         # ── file buttons ──
         file_row = QHBoxLayout()
         file_row.setSpacing(10)
-        open_wav = QPushButton("Summarize Audio File")
+        open_wav = QPushButton(t("summarize_audio"))
         open_wav.setStyleSheet(_BTN_SECONDARY)
         open_wav.clicked.connect(self._open_audio)
-        open_txt = QPushButton("Summarize Transcript")
+        open_txt = QPushButton(t("summarize_transcript"))
         open_txt.setStyleSheet(_BTN_SECONDARY)
         open_txt.clicked.connect(self._open_transcript)
         file_row.addWidget(open_wav)
@@ -1899,7 +2095,7 @@ class MainWindow(QMainWindow):
         root.addLayout(file_row)
 
         # ── drop zone ──
-        self.drop_label = QLabel("or drag & drop audio / transcript files here")
+        self.drop_label = QLabel(t("drop_hint"))
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label.setStyleSheet(f"""
             color: {_C['text_muted']};
@@ -1930,7 +2126,7 @@ class MainWindow(QMainWindow):
 
         # ── result area ──
         self.result_text = QTextEdit()
-        self.result_text.setPlaceholderText("Summary will appear here…")
+        self.result_text.setPlaceholderText(t("summary_placeholder"))
         self.result_text.setMinimumHeight(120)
         self.result_text.setStyleSheet("""
             QTextEdit {
@@ -1947,7 +2143,7 @@ class MainWindow(QMainWindow):
         # ── bottom buttons ──
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(10)
-        self.copy_btn = QPushButton("  Copy Summary")
+        self.copy_btn = QPushButton(t("copy_summary"))
         self.copy_btn.setIcon(_make_copy_icon(24, QColor(_C["primary"])))
         self.copy_btn.setIconSize(QSize(16, 16))
         self.copy_btn.setStyleSheet(_BTN_SECONDARY)
@@ -1955,7 +2151,7 @@ class MainWindow(QMainWindow):
         self.copy_btn.setEnabled(False)
         bottom_row.addWidget(self.copy_btn)
 
-        self.transcript_btn = QPushButton("  Open Transcript")
+        self.transcript_btn = QPushButton(t("open_transcript"))
         self.transcript_btn.setStyleSheet(_BTN_SECONDARY)
         self.transcript_btn.clicked.connect(self._open_transcript_file)
         self.transcript_btn.setEnabled(False)
@@ -1963,7 +2159,7 @@ class MainWindow(QMainWindow):
 
         bottom_row.addStretch()
 
-        self.update_ctx_btn = QPushButton("Update Context")
+        self.update_ctx_btn = QPushButton(t("update_context"))
         self.update_ctx_btn.setStyleSheet(_BTN_PRIMARY + """
             QPushButton { padding: 6px 14px; font-size: 12px; border-radius: 6px; }
         """)
@@ -1984,11 +2180,11 @@ class MainWindow(QMainWindow):
     def _apply_mode_ui(self):
         """Update UI labels based on transcribe-only mode."""
         if self._is_transcribe_only():
-            self.copy_btn.setText("  Copy Transcript")
-            self.result_text.setPlaceholderText("Transcript will appear here…")
+            self.copy_btn.setText(t("copy_transcript"))
+            self.result_text.setPlaceholderText(t("transcript_placeholder"))
         else:
-            self.copy_btn.setText("  Copy Summary")
-            self.result_text.setPlaceholderText("Summary will appear here…")
+            self.copy_btn.setText(t("copy_summary"))
+            self.result_text.setPlaceholderText(t("summary_placeholder"))
 
     # ── context management ───────────────────────────────────────────
 
@@ -2060,7 +2256,7 @@ class MainWindow(QMainWindow):
         self.context_combo.blockSignals(True)
         prev = self.context_combo.currentData()
         self.context_combo.clear()
-        self.context_combo.addItem("(none)", "")
+        self.context_combo.addItem(t("context_none"), "")
         for name in list_contexts():
             self.context_combo.addItem(name, name)
         if prev:
@@ -2072,7 +2268,7 @@ class MainWindow(QMainWindow):
 
     def _add_context(self):
         from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New Context", "Context name:")
+        name, ok = QInputDialog.getText(self, t("new_context_title"), t("new_context_prompt"))
         if ok and name.strip():
             create_context(name.strip())
             self._prev_context_name = None
@@ -2086,8 +2282,8 @@ class MainWindow(QMainWindow):
         if not name:
             return
         answer = QMessageBox.question(
-            self, "Delete Context",
-            f"Delete context '{name}'?",
+            self, t("delete_context_title"),
+            t("delete_context_confirm", name=name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
@@ -2151,18 +2347,18 @@ class MainWindow(QMainWindow):
         )
         self._recorder.start(on_auto_stop=lambda: self._auto_stop_signal.emit())
         self._recording_start = time.monotonic()
-        self.record_btn.setText("  Stop  0:00")
+        self.record_btn.setText(t("stop_recording", time="0:00"))
         self.record_btn.setIcon(self._stop_icon)
         self.record_btn.setStyleSheet(_BTN_RECORDING)
         self._rec_timer.start()
-        self._set_status("Recording…", "recording")
+        self._set_status(t("status_recording"), "recording")
 
         # Start real-time transcription
         self._rt_model_ready = False
         self._rt_sample_rate = self._recorder.sample_rate
         self._rt_committed_len = 0
         self.result_text.setReadOnly(True)
-        self.result_text.setPlaceholderText("Live transcript will appear here while recording…")
+        self.result_text.setPlaceholderText(t("live_transcript_placeholder"))
         self.result_text.clear()
         wm = cfg.get("whisper_model", "base")
         if not config.is_model_downloaded(wm):
@@ -2208,7 +2404,7 @@ class MainWindow(QMainWindow):
 
         if not audio_file:
             _logger.warning("Recording stopped but no audio captured")
-            self._set_status("Recording failed — no audio captured", "error")
+            self._set_status(t("status_recording_failed"), "error")
             return
 
         _logger.info("Recording stopped, audio_path=%s, duration=%ss", audio_file, duration)
@@ -2236,7 +2432,7 @@ class MainWindow(QMainWindow):
             # Transcribe only the small delta, then append
             _logger.info("RT: transcribing delta (%d samples, ~%.1fs)",
                          len(delta), len(delta) / sample_rate)
-            self._set_status(f"{status_prefix}Finishing last few seconds…", "busy")
+            self._set_status(f"{status_prefix}{t('status_finishing')}", "busy")
             self.progress.setVisible(True)
             self.record_btn.setEnabled(False)
             self._rt_existing_text = existing_text
@@ -2251,7 +2447,7 @@ class MainWindow(QMainWindow):
         else:
             # No RT text at all, fall back to full transcription
             _logger.info("RT: no existing text, falling back to full transcription")
-            self._set_status(f"{status_prefix}Processing recording…", "busy")
+            self._set_status(f"{status_prefix}{t('status_processing')}", "busy")
             self._process_audio(audio_file, duration_seconds=duration)
 
     def _on_delta_done(self, delta_text: str):
@@ -2281,13 +2477,7 @@ class MainWindow(QMainWindow):
         if not transcript.strip():
             _logger.warning("RT transcript is empty")
             self._set_busy(False)
-            self._on_error(
-                "No speech detected in the recording.\n\n"
-                "Possible reasons:\n"
-                "- The recording was too short\n"
-                "- Microphone didn't capture audio (check Input Device in Settings)\n"
-                "- Audio was too quiet"
-            )
+            self._on_error(t("error_no_speech"))
             return
 
         _logger.info("Using RT transcript (%d chars), transcribe_only=%s",
@@ -2327,18 +2517,18 @@ class MainWindow(QMainWindow):
         self._rt_timer.stop()
         duration = int(time.monotonic() - self._recording_start) if self._recording_start else None
         if self._recorder:
-            self._finish_recording_with_rt(duration, "Silence detected — ")
+            self._finish_recording_with_rt(duration, t("status_silence"))
 
     def _update_rec_elapsed(self):
         if self._recording_start is None:
             return
         elapsed = int(time.monotonic() - self._recording_start)
         mins, secs = divmod(elapsed, 60)
-        self.record_btn.setText(f"  Stop  {mins}:{secs:02d}")
+        self.record_btn.setText(t("stop_recording", time=f"{mins}:{secs:02d}"))
 
     def _reset_record_btn(self):
         self._recording_start = None
-        self.record_btn.setText("  Start Recording")
+        self.record_btn.setText(t("start_recording"))
         self.record_btn.setIcon(self._mic_icon)
         self.record_btn.setStyleSheet(_BTN_PRIMARY)
 
@@ -2383,13 +2573,13 @@ class MainWindow(QMainWindow):
 
     def _open_audio(self):
         exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS))
-        path, _ = QFileDialog.getOpenFileName(self, "Open Audio File", "", f"Audio ({exts})")
+        path, _ = QFileDialog.getOpenFileName(self, t("open_audio_title"), "", f"Audio ({exts})")
         if path:
             self._process_audio(path)
 
     def _open_transcript(self):
         exts = " ".join(f"*{e}" for e in sorted(TRANSCRIPT_EXTENSIONS))
-        path, _ = QFileDialog.getOpenFileName(self, "Open Transcript", "", f"Text ({exts})")
+        path, _ = QFileDialog.getOpenFileName(self, t("open_transcript_title"), "", f"Text ({exts})")
         if path:
             self._process_transcript_file(path)
 
@@ -2411,7 +2601,7 @@ class MainWindow(QMainWindow):
             if ext in TRANSCRIPT_EXTENSIONS:
                 self._process_transcript_file(path)
                 return
-        self._set_status("Unsupported file type", "error")
+        self._set_status(t("status_unsupported_file"), "error")
 
     # ── processing pipelines ─────────────────────────────────────────
 
@@ -2467,13 +2657,7 @@ class MainWindow(QMainWindow):
         if not transcript or not transcript.strip():
             _logger.warning("Transcription returned empty text")
             self._set_busy(False)
-            self._on_error(
-                "No speech detected in the recording.\n\n"
-                "Possible reasons:\n"
-                "- The recording was too short\n"
-                "- Microphone didn't capture audio (check Input Device in Settings)\n"
-                "- Audio was too quiet"
-            )
+            self._on_error(t("error_no_speech"))
             self._pending_duration = None
             return
 
@@ -2500,10 +2684,10 @@ class MainWindow(QMainWindow):
         try:
             text = Path(file_path).read_text(encoding="utf-8").strip()
         except Exception as e:
-            self._on_error(f"Failed to read file: {e}")
+            self._on_error(t("error_read_file", error=e))
             return
         if not text:
-            self._on_error("File is empty")
+            self._on_error(t("error_file_empty"))
             return
 
         # Copy to recordings
@@ -2542,7 +2726,7 @@ class MainWindow(QMainWindow):
         self.result_text.setPlainText(transcript)
         self.copy_btn.setEnabled(True)
         self.transcript_btn.setEnabled(bool(self._current_transcript_path))
-        self._set_status("Done", "done")
+        self._set_status(t("status_done"), "done")
         if config.load().get("sound_on_done", True):
             self._play_done_sound()
 
@@ -2554,7 +2738,7 @@ class MainWindow(QMainWindow):
         self.copy_btn.setEnabled(True)
         self.transcript_btn.setEnabled(bool(self._current_transcript_path))
         self.update_ctx_btn.setVisible(False)
-        self._set_status("Done", "done")
+        self._set_status(t("status_done"), "done")
         self._refresh_contexts()
         if config.load().get("sound_on_done", True):
             self._play_done_sound()
@@ -2577,10 +2761,10 @@ class MainWindow(QMainWindow):
             update_latest_context_entry(name, new_text)
             self._saved_summary = new_text
             self.update_ctx_btn.setVisible(False)
-            self._set_status("Context updated", "done")
+            self._set_status(t("status_context_updated"), "done")
         except Exception as e:
             _logger.error("Failed to update context: %s", e)
-            QMessageBox.warning(self, "Error", f"Could not update context: {e}")
+            QMessageBox.warning(self, t("error_title"), f"Could not update context: {e}")
 
     @staticmethod
     def _play_done_sound():
@@ -2597,7 +2781,7 @@ class MainWindow(QMainWindow):
         _logger.error("Error: %s", msg)
         self._set_busy(False)
         self._set_status(f"Error: {msg}", "error")
-        QMessageBox.critical(self, "Error", msg)
+        QMessageBox.critical(self, t("error_title"), msg)
 
     # ── helpers ──────────────────────────────────────────────────────
 
@@ -2660,14 +2844,14 @@ class MainWindow(QMainWindow):
             mime.setText(text)
             mime.setHtml(self._mrkdwn_to_html(text))
             QApplication.clipboard().setMimeData(mime)
-            self._set_status("Copied to clipboard", "done")
+            self._set_status(t("status_copied"), "done")
 
     def _open_transcript_file(self):
         if self._current_transcript_path and Path(self._current_transcript_path).exists():
             import subprocess
             subprocess.Popen(["open", self._current_transcript_path])
         else:
-            self._set_status("No transcript file available", "error")
+            self._set_status(t("status_no_transcript"), "error")
 
     def _open_settings(self):
         if not hasattr(self, "_bg_whisper_downloads"):
@@ -2720,7 +2904,7 @@ def main():
     cfg = config.load()
     is_first_run = not cfg.get("api_key", "").strip() and not cfg.get("setup_done")
     if is_first_run:
-        dlg = QuickSetupDialog(window)
+        dlg = SetupWizard(window)
         dlg.exec()
         # Mark setup as seen so we don't show again even if key is skipped
         cfg2 = config.load()

@@ -148,7 +148,11 @@ def page_cover(c):
     c.setFont(F, 12)
     c.setFillColor(Color(1, 1, 1, 0.7))
     c.drawCentredString(W / 2, H / 2 - 55, "Record, transcribe and summarize meetings with AI")
-    c.drawCentredString(W / 2, H / 2 - 75, "macOS  /  Whisper  /  Gemini  /  GPT-5  /  Claude")
+    c.drawCentredString(W / 2, H / 2 - 75, "macOS  /  Whisper  /  Gemini  /  GPT-5  /  Ollama")
+
+    c.setFont(F, 9)
+    c.setFillColor(Color(1, 1, 1, 0.45))
+    c.drawCentredString(W / 2, H / 2 - 105, "v1.12")
 
 
 # ─── Installation ───────────────────────────────────────────────────
@@ -171,12 +175,12 @@ def page_install(c):
          "Drag the Summarizer icon into the Applications folder shortcut."),
         ("Launch and allow",
          "Open Summarizer from Applications (Launchpad or Finder).\n"
-         "macOS will say the app is from an unidentified developer — open\n"
-         "System Settings → Privacy & Security → scroll down → Open Anyway."),
+         "macOS will block it — right-click the app → Open → click Open again.\n"
+         "Or: System Settings → Privacy & Security → scroll down → Open Anyway."),
         ("Set up an AI model",
          "Click the gear icon → Models tab.\n"
          "Cloud: enter your API key (free Gemini key at aistudio.google.com/apikey)\n"
-         "Local: click Pull on any Ollama model — no API key, fully offline."),
+         "Local: click Download on any Ollama model — no API key, fully offline."),
     ]
 
     y = H - 110
@@ -234,14 +238,15 @@ def page_install(c):
     c.drawCentredString(ax2 + isz / 2, my + 16, "Applications")
 
     # "Open Anyway" note
-    rrect(c, 60, 55, W - 120, 50, r=6, fill=Color(0.29, 0.56, 0.85, 0.07))
+    rrect(c, 60, 42, W - 120, 68, r=6, fill=Color(0.29, 0.56, 0.85, 0.07))
     c.setFillColor(PRIMARY)
     c.setFont(FB, 9)
-    c.drawString(75, 90, "First launch only:")
+    c.drawString(75, 95, "First launch only (bypass macOS quarantine):")
     c.setFont(F, 9)
     c.setFillColor(TEXT)
-    c.drawString(75, 76, "System Settings → Privacy & Security → Open Anyway")
-    c.drawString(75, 63, "This is required once for any app not from the App Store.")
+    c.drawString(75, 81, "Option A:  Right-click the app → Open → click Open in the dialog")
+    c.drawString(75, 67, "Option B:  System Settings → Privacy & Security → Open Anyway")
+    c.drawString(75, 53, "This is required once for any app not from the App Store.")
 
 
 # ─── What Is ────────────────────────────────────────────────────────
@@ -364,20 +369,38 @@ def page_main_window(c):
     c.setFillColor(BG)
     c.circle(gx, gy, 3, fill=1, stroke=0)
 
-    # Context
-    ct = ty - 14
-    ch = 48
-    cy = ct - ch
-    rrect(c, ox + 8, cy, ww - 16, ch, r=5, fill=Color(1, 1, 1, 0.4), stroke=BORDER, sw=0.3)
+    # Context row
+    ct = ty - 12
     c.setFillColor(TEXT2)
     c.setFont(F, 7)
-    c.drawString(ox + 14, cy + ch - 10, "Context")
-    c.drawString(ox + 14, cy + ch - 24, "Named:")
-    combo(c, ox + 50, cy + ch - 28, 170, 14)
+    c.drawString(ox + 14, ct, "Context:")
+    combo(c, ox + 52, ct - 4, 150, 14)
     c.setFillColor(PRIMARY)
     c.setFont(FB, 11)
-    c.drawString(ox + 228, cy + ch - 26, "+")
-    field(c, ox + 14, cy + 4, ww - 36, 14, "Quick context...")
+    c.drawString(ox + 206, ct - 2, "+")
+    c.setFillColor(HexColor("#b08800"))
+    c.setFont(F, 12)
+    c.drawString(ox + 222, ct - 2, "\u270f")
+    c.setFillColor(DANGER)
+    c.setFont(FB, 11)
+    c.drawString(ox + 238, ct - 2, "\u00d7")
+
+    # General context field
+    gc_y = ct - 20
+    c.setFillColor(TEXT2)
+    c.setFont(F, 6.5)
+    c.drawString(ox + 14, gc_y, "General context")
+    field(c, ox + 14, gc_y - 20, ww - 36, 18, "Weekly sync, PM + Eng team...")
+
+    # This meeting context field
+    mc_y = gc_y - 44
+    c.setFillColor(TEXT2)
+    c.setFont(F, 6.5)
+    c.drawString(ox + 14, mc_y, "This meeting context")
+    field(c, ox + 14, mc_y - 20, ww - 36, 18, "Sprint review, demo prep...")
+
+    cy = mc_y - 20
+    ch = ct - cy
 
     # Record
     ry = cy - 10
@@ -452,7 +475,7 @@ def page_main_window(c):
 
     ann("Settings", "LLM, Whisper, API keys",
         gx - 8, gy, oy + wh - 40)
-    ann("Context", "Meeting history + quick notes",
+    ann("Context", "General + per-meeting notes",
         ox + ww - 8, cy + ch / 2, cy + ch / 2 + 6)
     ann("Record", "Click to start recording",
         ox + ww - 8, ry + rh / 2, ry + rh / 2 + 6)
@@ -482,7 +505,7 @@ def page_recording(c):
          True),
         ("Automatic Stop",
          "Recording stops automatically after a period of silence "
-         "(configurable in Settings, default 30 seconds). "
+         "(configurable in Settings, default 180 seconds / 3 minutes). "
          "You can also stop manually by pressing the red button.",
          False),
         ("Transcription",
@@ -633,24 +656,38 @@ def page_settings_models(c):
     ry -= 16
 
     local_models = [
-        ("GLM-4 9B", "Good", "5.5 GB", False),
-        ("Gemma 3 12B", "Better", "8.1 GB", False),
-        ("DeepSeek R1 14B", "Best reasoning", "9.0 GB", False),
+        ("GLM-4 9B", "Good", "5.5 GB", False, False),
+        ("Gemma 3 12B QAT", "Better", "8.9 GB", False, False),
+        ("Qwen 3 30B", "Great", "19 GB", False, False),
+        ("GPT-OSS 20B", "Best", "12 GB", True, True),
     ]
-    for name, quality, size, selected in local_models:
+    for name, quality, size, selected, downloaded in local_models:
         c.saveState()
         c.setStrokeColor(PRIMARY if selected else BORDER)
         c.setLineWidth(1)
         c.circle(sx + 24, ry + 3, 4.5, fill=0, stroke=1)
-        c.setFillColor(TEXT)
-        c.setFont(FB, 8.5)
+        if selected:
+            c.setFillColor(PRIMARY)
+            c.circle(sx + 24, ry + 3, 2.5, fill=1, stroke=0)
+        c.setFillColor(TEXT if selected else TEXT2)
+        c.setFont(FB if selected else F, 8.5)
         c.drawString(sx + 34, ry, name)
-        c.setFont(F, 8)
+        c.setFont(F, 7.5)
         c.setFillColor(TEXT2)
-        c.drawString(sx + 120, ry, f"— {quality} ({size})")
-        c.setFillColor(PRIMARY)
-        c.setFont(F, 8)
-        c.drawString(sx + sw - 50, ry, "Pull")
+        c.drawString(sx + 118, ry, f"— {quality} ({size})")
+        if downloaded:
+            c.setFillColor(SUCCESS)
+            c.setFont(FB, 7.5)
+            c.drawString(sx + sw - 90, ry, "Ready")
+            c.setFillColor(PRIMARY)
+            c.setFont(F, 7.5)
+            c.drawString(sx + sw - 68, ry, "Test")
+            c.setFillColor(DANGER)
+            c.drawString(sx + sw - 44, ry, "Delete")
+        else:
+            c.setFillColor(PRIMARY)
+            c.setFont(F, 7.5)
+            c.drawString(sx + sw - 60, ry, "Download")
         c.restoreState()
         ry -= 15
 
@@ -714,8 +751,8 @@ def page_settings_models(c):
 
     ann("Cloud presets", "Select a model or enter\na custom model name", H - 150)
     ann("API credentials", "Key for the selected\ncloud provider", H - 245)
-    ann("Local models (Ollama)", "Run AI on your Mac —\n100% offline, no API key.\nClick Pull to download.", H - 320)
-    ann("Whisper models", "Speech-to-text (offline).\nLarger = more accurate\nbut slower.", H - 440)
+    ann("Local models (Ollama)", "Run AI on your Mac —\n100% offline, no API key.\nDownload, Test, or Delete.", H - 330)
+    ann("Whisper models", "Speech-to-text (offline).\nLarger = more accurate\nbut slower.", H - 460)
 
 
 # ─── Settings: Instructions tab ────────────────────────────────────
@@ -818,14 +855,16 @@ def page_settings_general(c):
     rows = [
         ("Context Limit:", "5000 chars",
          "Max characters loaded from context file.\nOlder content is trimmed automatically."),
-        ("Silence Timeout:", "30 sec",
-         "Stop recording after this much silence.\nRange: 5–300 seconds."),
+        ("Silence Timeout:", "180 sec",
+         "Auto-stop after this much silence (3 min).\nAdaptive calibration measures mic noise first."),
         ("Input Device:", "Default",
-         "Choose your microphone.\nDefault uses the system input device."),
+         "Choose your microphone or loopback device.\nDefault uses the system input."),
         ("Save Audio:", "off",
-         "When on, saves WAV recordings to disk.\nOff by default — files are temporary."),
+         "When on, saves WAV recordings to disk.\nOff by default — recordings are temporary."),
+        ("Sound:", "on",
+         "Play a sound when the summary is ready."),
         ("Recordings Dir:", "~/.summarizer/recordings",
-         "Where transcripts and context files\nare stored."),
+         "Where transcripts and context files are stored."),
     ]
 
     for label, value, note in rows:
@@ -840,7 +879,29 @@ def page_settings_general(c):
         for line in note.split("\n"):
             c.drawString(sx + 14, ry, line)
             ry -= 12
-        ry -= 16
+        ry -= 10
+
+    # Divider
+    c.setStrokeColor(BORDER)
+    c.setLineWidth(0.4)
+    c.line(sx + 10, ry + 4, sx + sw - 10, ry + 4)
+    ry -= 12
+
+    # Version + update
+    c.setFillColor(TEXT2)
+    c.setFont(F, 8.5)
+    c.drawString(sx + 14, ry, "Version:")
+    c.setFillColor(TEXT)
+    c.setFont(FB, 8.5)
+    c.drawString(sx + 70, ry, "v1.12")
+    dbtn(c, sx + sw - 145, ry - 5, 130, 18, "Check for Updates", PRIMARY, white, 8)
+    ry -= 28
+
+    dbtn(c, sx + 14, ry - 5, 100, 18, "Open Log File", Color(0.43, 0.43, 0.45), white, 8)
+    c.setFillColor(TEXT2)
+    c.setFont(F, 8)
+    c.drawString(sx + 124, ry, "~/.summarizer/summarizer.log")
+    ry -= 24
 
 
 # ─── Context ────────────────────────────────────────────────────────
@@ -860,64 +921,60 @@ def page_context(c):
              "generating summaries. This is useful for recurring meetings (standups, "
              "1-on-1s) where tracking progress and action items matters."),
         (hs, "Named Context"),
-        (bs, "Create a named context with the <b>+</b> button next to the dropdown. "
-             "Each time a summary is generated, previous summaries are automatically "
-             "loaded from the context file, and the new summary is appended."),
-        (bs, "Files stored at: <b>~/.summarizer/recordings/name_context.txt</b>"),
-        (hs, "Quick Context"),
-        (bs, "The text field in the main window for one-off notes — it is <b>always</b> "
-             "included in the prompt, even if a named context is selected. "
-             "Example: 'meeting with client X', 'focus on backend tasks'."),
-        (bs, "Quick context is also saved to the named context file if one is selected."),
-        (hs, "Context Limit"),
-        (bs, "Settings lets you configure the maximum number of characters loaded from "
-             "the context file (default 5000). When exceeded, the last N characters are "
-             "taken, trimmed at a line boundary."),
+        (bs, "Create a named context with the <b>+</b> button. "
+             "Edit the raw file with <b>\u270f</b>. "
+             "Delete with <b>\u00d7</b>. "
+             "Each context has two parts: General context and History."),
+        (hs, "General Context"),
+        (bs, "Persistent info about this meeting series — type, goals, usual "
+             "participants, key terms. Shown when a named context is selected. "
+             "Always included in full in the LLM prompt. "
+             "Saved automatically when you switch contexts or generate a summary."),
+        (hs, "This Meeting Context"),
+        (bs, "Per-session details — today's agenda, attendees, specific topics. "
+             "Always included in the prompt. Stays after summarization so you can "
+             "review it. Saved to the context history alongside the summary."),
+        (hs, "History & Budget"),
+        (bs, "Each summary is prepended to the History section (newest first). "
+             "The Context Limit (default 5000 chars) controls how much history "
+             "is loaded — General + Meeting context are always included in full, "
+             "remaining budget is filled with history entries."),
     ]
 
-    fr = Frame(40, 260, W - 80, H - 120 - 260, showBoundary=0)
+    fr = Frame(40, 240, W - 80, H - 120 - 240, showBoundary=0)
     fr.addFromList([Paragraph(t, s) for s, t in content], c)
 
-    # Diagram
-    dy = 225
+    # File format diagram
+    fy = 210
     c.setFont(FB, 11)
     c.setFillColor(PRIMARY)
-    c.drawCentredString(W / 2, dy, "Context Accumulation")
+    c.drawCentredString(W / 2, fy, "Context File Format")
 
-    boxes = ["Meeting 1", "Meeting 2", "Meeting 3", "..."]
-    bw, bh = 100, 40
-    gap = 16
-    total = len(boxes) * bw + (len(boxes) - 1) * gap
-    bx = (W - total) / 2
-    for i, label in enumerate(boxes):
-        x = bx + i * (bw + gap)
-        color = PRIMARY if i < 3 else MUTED
-        rrect(c, x, dy - 60, bw, bh, r=6, fill=color)
-        c.setFillColor(white)
-        c.setFont(FB, 9)
-        tw = c.stringWidth(label, FB, 9)
-        c.drawString(x + (bw - tw) / 2, dy - 48, label)
-        c.setFont(F, 7)
-        c.drawCentredString(x + bw / 2, dy - 56, "summary")
-        if i < len(boxes) - 1:
-            arr(c, x + bw + 3, dy - 40, x + bw + gap - 3, dy - 40,
-                color=TEXT2, w=0.8, hs=4)
-
+    rrect(c, 60, fy - 130, W - 120, 120, r=6, fill=Color(0, 0, 0, 0.04))
+    c.setFont(FB, 8)
+    c.setFillColor(PRIMARY)
+    c.drawString(75, fy - 16, "=== GENERAL ===")
+    c.setFont(F, 8.5)
     c.setFillColor(TEXT2)
-    c.setFont(F, 9)
-    c.drawCentredString(W / 2, dy - 78,
-                        "Each new summary is appended to the context and used for the next one")
+    c.drawString(75, fy - 30, "Weekly product sync. PM + Eng team. Goal: sprint review.")
+    c.setFont(FB, 8)
+    c.setFillColor(PRIMARY)
+    c.drawString(75, fy - 50, "=== HISTORY ===")
+    c.setFont(F, 8.5)
+    c.setFillColor(TEXT2)
+    c.drawString(75, fy - 64, "[2026-03-15 10:00]")
+    c.drawString(75, fy - 78, "Meeting context: Sprint review, demo prep")
+    c.drawString(75, fy - 92, "Summary: Discussed RFC-42 timeline. Dashboard approved...")
+    c.drawString(75, fy - 110, "[2026-03-08 10:00]  ...")
 
     # File structure
-    fy = dy - 110
-    rrect(c, 60, fy - 60, W - 120, 55, r=6, fill=Color(0, 0, 0, 0.04))
+    rrect(c, 60, 50, W - 120, 48, r=6, fill=Color(0, 0, 0, 0.04))
     c.setFillColor(TEXT2)
     c.setFont(FB, 9)
-    c.drawString(75, fy - 12, "~/.summarizer/")
+    c.drawString(75, 82, "~/.summarizer/")
     c.setFont(F, 9)
-    c.drawString(90, fy - 26, "recordings/standup_context.txt    - standup context")
-    c.drawString(90, fy - 40, "recordings/client_x_context.txt   - client X context")
-    c.drawString(90, fy - 54, "models/base/                      - Whisper models")
+    c.drawString(90, 68, "recordings/standup_context.txt    — standup context")
+    c.drawString(90, 55, "recordings/client_x_context.txt   — client X context")
 
 
 # ─── FAQ ────────────────────────────────────────────────────────────
@@ -947,12 +1004,15 @@ def page_faq(c):
          "Config: ~/.summarizer/config.json. "
          "Contexts &amp; transcripts: ~/.summarizer/recordings/. "
          "Whisper models: ~/.summarizer/models/. "
-         "Recorder logs: ~/.summarizer/recorder.log"),
+         "App log: ~/.summarizer/summarizer.log (open via Settings → General → Open Log File)."),
         ("Is it safe?",
          "Audio is always processed <b>locally</b> by Whisper — it never leaves your Mac. "
          "With cloud models, only the text transcript is sent to the LLM. "
          "With <b>local models (Ollama)</b>, everything stays on your Mac — fully offline, "
          "no data ever leaves your machine."),
+        ("How do I test a local model before using it?",
+         "In Settings → Models, once a local model is downloaded, a <b>Test</b> button appears. "
+         "Click it to open a chat window and send messages directly to the model."),
         ("Can I use a custom LLM endpoint?",
          "Yes — set the <b>Base URL</b> field in Settings to point to any "
          "OpenAI-compatible API endpoint."),

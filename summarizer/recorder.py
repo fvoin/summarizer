@@ -36,7 +36,10 @@ class AudioRecorder:
         self._last_sound_time: Optional[float] = None
         self._silence_threshold = silence_timeout
         self._sound_time_lock = threading.Lock()
-        self._rms_threshold = 0.001
+        self._rms_threshold = 0.01
+        self._calibrating = True
+        self._calibration_samples: list = []
+        self._calibration_end: float = 0.0
         self._peak_rms = 0.0
         self._last_rms_log_time = 0.0
 
@@ -45,6 +48,10 @@ class AudioRecorder:
         self._input_device = input_device
         self._temp_files: list = []
         self._on_auto_stop: Optional[Callable] = None
+
+        # Real-time audio buffer — one list per device, concatenated sequentially on read
+        self._rt_frames_per_device: dict = {}
+        self._rt_lock = threading.Lock()
 
     # ── device listing ───────────────────────────────────────────────────
 
@@ -59,16 +66,39 @@ class AudioRecorder:
 
     # ── silence detection ────────────────────────────────────────────────
 
+    _CALIBRATION_SECS = 3.0
+    _CALIBRATION_FACTOR = 4.0
+    _MIN_THRESHOLD = 0.005
+    _MAX_NOISE_FLOOR = 0.02   # cap so speech during calibration doesn't inflate threshold
+
     def _detect_silence(self, audio_data: np.ndarray) -> bool:
         if len(audio_data) == 0:
             return True
-        rms = np.sqrt(np.mean(audio_data ** 2))
+        rms = float(np.sqrt(np.mean(audio_data.astype(np.float64) ** 2)))
         if rms > self._peak_rms:
             self._peak_rms = rms
         now = time.time()
-        if now - self._last_rms_log_time >= 5.0:
+
+        if self._calibrating:
+            self._calibration_samples.append(rms)
+            if now >= self._calibration_end:
+                raw_floor = float(np.median(self._calibration_samples)) if self._calibration_samples else 0.0
+                noise_floor = min(raw_floor, self._MAX_NOISE_FLOOR)
+                self._rms_threshold = max(noise_floor * self._CALIBRATION_FACTOR, self._MIN_THRESHOLD)
+                self._calibrating = False
+                # Reset timer so silence window starts fresh after calibration
+                with self._sound_time_lock:
+                    self._last_sound_time = now
+                _log(f"Silence calibration done: raw_floor={raw_floor:.5f}, "
+                     f"capped_floor={noise_floor:.5f}, threshold={self._rms_threshold:.5f} "
+                     f"({len(self._calibration_samples)} samples)")
+            return False
+
+        if now - self._last_rms_log_time >= 10.0:
+            _log(f"RMS: current={rms:.5f}, peak={self._peak_rms:.5f}, threshold={self._rms_threshold:.5f}")
             self._last_rms_log_time = now
             self._peak_rms = 0.0
+
         return rms < self._rms_threshold
 
     # ── recording ────────────────────────────────────────────────────────
@@ -111,23 +141,55 @@ class AudioRecorder:
         self._audio_file = os.path.join(tempfile.gettempdir(), f"summarizer_recording_{ts}.wav")
         self._recording = True
         self._stop_event = threading.Event()
-        self._last_sound_time = time.time()
-        self._last_rms_log_time = time.time()
+        now = time.time()
+        self._last_sound_time = now
+        self._last_rms_log_time = now
         self._peak_rms = 0.0
+        self._calibrating = True
+        self._calibration_samples = []
+        self._calibration_end = now + self._CALIBRATION_SECS
         self._temp_files = []
         self._threads = []
+        with self._rt_lock:
+            self._rt_frames_per_device = {}
 
         tmp_dir = tempfile.gettempdir()
         for idx in selected:
             tmp = os.path.join(tmp_dir, f"summarizer_rec_{ts}_{idx}.wav")
             self._temp_files.append(tmp)
-            t = threading.Thread(target=self._record_to_file, args=(idx, tmp, self._stop_event), daemon=True)
+            t = threading.Thread(
+                target=self._record_to_file,
+                args=(idx, tmp, self._stop_event),
+                daemon=True,
+            )
             t.start()
             self._threads.append(t)
 
         self._monitor_thread = threading.Thread(target=self._monitor_silence, daemon=True)
         self._monitor_thread.start()
         return self._audio_file
+
+    def get_all_rt_audio(self) -> Optional[np.ndarray]:
+        """Return ALL accumulated RT audio from all devices mixed together.
+
+        Does NOT clear the buffer — each call returns the full recording so far.
+        If multiple devices are recording, their audio is averaged (mixed).
+        """
+        # Copy references under lock, do heavy work outside
+        with self._rt_lock:
+            snapshot = {k: list(v) for k, v in self._rt_frames_per_device.items()}
+        device_arrays = []
+        for dev_id in sorted(snapshot.keys()):
+            frames = snapshot[dev_id]
+            if frames:
+                device_arrays.append(np.concatenate(frames, axis=0))
+        if not device_arrays:
+            return None
+        if len(device_arrays) == 1:
+            return device_arrays[0]
+        min_len = min(len(a) for a in device_arrays)
+        mixed = np.mean([a[:min_len].astype(np.float64) for a in device_arrays], axis=0)
+        return mixed.astype(np.float32)
 
     def _record_to_file(self, device_id: int, filename: str, stop_event: threading.Event):
         try:
@@ -143,6 +205,10 @@ class AudioRecorder:
                             self._last_sound_time = time.time()
                     f.write(indata)
                     frames_written += frame_count
+                    with self._rt_lock:
+                        if device_id not in self._rt_frames_per_device:
+                            self._rt_frames_per_device[device_id] = []
+                        self._rt_frames_per_device[device_id].append(indata.copy())
 
                 with sd.InputStream(device=device_id, samplerate=self.sample_rate, channels=self.channels, callback=callback):
                     while not stop_event.is_set():
@@ -154,10 +220,13 @@ class AudioRecorder:
 
     def _monitor_silence(self):
         while not self._stop_event.is_set() and self._recording:
+            if self._calibrating:
+                time.sleep(1.0)
+                continue
             with self._sound_time_lock:
                 elapsed = time.time() - self._last_sound_time
             if elapsed > self._silence_threshold:
-                _log(f"Silence detected ({elapsed:.1f}s). Auto-stopping.")
+                _log(f"Silence detected ({elapsed:.1f}s > {self._silence_threshold}s). Auto-stopping.")
                 self._stop_event.set()
                 self._recording = False
                 if self._on_auto_stop:

@@ -6,4 +6,5 @@ faster-whisper
 google-generativeai
 openai
 anthropic
+certifi
 pyinstaller

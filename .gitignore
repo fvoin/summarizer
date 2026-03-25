@@ -1,8 +1,10 @@
 dist/
 build/
 .venv/
-models/
+.venv_intel/
 bundled_ffmpeg/
+bundled_ffmpeg_intel/
+models/
 *.spec
 *.icns
 *.pyc

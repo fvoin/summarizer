@@ -2,12 +2,17 @@
 
 import json
 import logging
+import ssl
 import subprocess
 import urllib.request
 from pathlib import Path
 from typing import Optional, Dict
 
+import certifi
+
 from . import config
+
+_ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
 _logger = logging.getLogger("updater")
 
@@ -31,7 +36,7 @@ def check_for_update() -> Optional[Dict]:
         headers={"Accept": "application/vnd.github+json", "User-Agent": "Summarizer"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx) as resp:
             data = json.loads(resp.read().decode())
     except Exception as e:
         _logger.error("Update check failed: %s", e)
@@ -79,7 +84,7 @@ def download_and_open(dmg_url: str, progress_cb=None) -> Path:
     _logger.info("Downloading %s → %s", dmg_url, dest)
 
     req = urllib.request.Request(dmg_url, headers={"User-Agent": "Summarizer"})
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=120, context=_ssl_ctx) as resp:
         total = int(resp.headers.get("Content-Length", 0))
         downloaded = 0
         chunk_size = 256 * 1024

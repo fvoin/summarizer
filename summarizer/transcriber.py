@@ -43,6 +43,10 @@ def download_model(model_name: str, progress_cb: Optional[Callable[[float], None
     return dest
 
 
+# Module-level cache so the WhisperModel is only loaded once per session.
+_model_cache: dict = {}
+
+
 class Transcriber:
     def __init__(self, model_name: str = "base"):
         self.model_name = model_name
@@ -50,6 +54,11 @@ class Transcriber:
 
     def _load_model(self):
         if self._model is not None:
+            return
+        # Return cached instance if available (avoids re-loading between RT and final pass)
+        if self.model_name in _model_cache:
+            self._model = _model_cache[self.model_name]
+            _log(f"Model '{self.model_name}' served from cache")
             return
         from faster_whisper import WhisperModel
 
@@ -60,6 +69,7 @@ class Transcriber:
         else:
             _log(f"Model '{self.model_name}' not cached locally, downloading via faster-whisper…")
             self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+        _model_cache[self.model_name] = self._model
 
     @staticmethod
     def _find_ffmpeg() -> Optional[str]:
@@ -91,6 +101,35 @@ class Transcriber:
             _logger.warning("ffmpeg conversion failed, using original: %s", e)
             Path(converted).unlink(missing_ok=True)
             return audio_path
+
+    def transcribe_array(self, audio_data, sample_rate: int) -> str:
+        """Transcribe audio from a numpy array. Used for real-time chunk transcription."""
+        import tempfile
+        import soundfile as sf_mod
+
+        self._load_model()
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            sf_mod.write(tmp_path, audio_data, sample_rate)
+            converted = self._convert_audio(tmp_path)
+            cleanup_conv = converted != tmp_path
+            try:
+                try:
+                    segments, _ = self._model.transcribe(
+                        converted, beam_size=3, word_timestamps=False, vad_filter=True
+                    )
+                except Exception:
+                    segments, _ = self._model.transcribe(
+                        converted, beam_size=3, word_timestamps=False
+                    )
+                return " ".join(seg.text for seg in segments).strip()
+            finally:
+                if cleanup_conv:
+                    Path(converted).unlink(missing_ok=True)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
     def transcribe(self, audio_path: str, language: Optional[str] = None) -> str:
         if not Path(audio_path).exists():
