@@ -823,7 +823,7 @@ class SetupWizard(QDialog):
         lay.addSpacing(4)
 
         lbl = QLabel(t("wizard_llm_type_title"))
-        lbl.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {_C['text']};")
+        lbl.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {_C['primary']};")
         lay.addWidget(lbl)
 
         self._rb_cloud = QRadioButton(t("wizard_cloud_title"))
@@ -1023,47 +1023,41 @@ class SetupWizard(QDialog):
     # ── Step 4: Work vs General ───────────────────────────────────────
 
     def _build_step_use_case(self) -> QWidget:
+        from PyQt6.QtWidgets import QRadioButton
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setSpacing(14)
+        lay.setSpacing(12)
         lay.setContentsMargins(28, 24, 28, 20)
 
         self._header(lay, t("wizard_use_step_title"))
         self._sep(lay)
         lay.addSpacing(4)
 
-        work_btn = QPushButton()
-        work_btn.setStyleSheet(self._CARD_STYLE.format(
-            bg="white", border=_C["border"], hover=_C["primary"], hover_bg="rgba(74,144,217,0.05)"))
-        wl = QVBoxLayout(work_btn)
-        wl.setContentsMargins(4, 4, 4, 4)
-        wt = QLabel(f"💼  <b>{t('wizard_work_title')}</b>")
-        wt.setStyleSheet("font-size: 15px; background: transparent;")
-        wl.addWidget(wt)
-        wd = QLabel(t("wizard_work_desc"))
-        wd.setWordWrap(True)
-        wd.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
-        wl.addWidget(wd)
-        work_btn.clicked.connect(lambda: self._on_use_choice("work"))
-        lay.addWidget(work_btn)
+        self._rb_work = QRadioButton(t("wizard_work_title"))
+        self._rb_work.setChecked(True)
+        self._rb_work.setStyleSheet("font-size: 13px;")
+        lay.addWidget(self._rb_work)
+        work_hint = QLabel(t("wizard_work_desc"))
+        work_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        lay.addWidget(work_hint)
 
-        gen_btn = QPushButton()
-        gen_btn.setStyleSheet(self._CARD_STYLE.format(
-            bg="white", border=_C["border"], hover=_C["accent"], hover_bg="rgba(123,104,238,0.05)"))
-        gl = QVBoxLayout(gen_btn)
-        gl.setContentsMargins(4, 4, 4, 4)
-        gt = QLabel(f"🗣️  <b>{t('wizard_general_title')}</b>")
-        gt.setStyleSheet("font-size: 15px; background: transparent;")
-        gl.addWidget(gt)
-        gd = QLabel(t("wizard_general_desc"))
-        gd.setWordWrap(True)
-        gd.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
-        gl.addWidget(gd)
-        gen_btn.clicked.connect(lambda: self._on_use_choice("general"))
-        lay.addWidget(gen_btn)
+        lay.addSpacing(6)
+
+        self._rb_general = QRadioButton(t("wizard_general_title"))
+        self._rb_general.setStyleSheet("font-size: 13px;")
+        lay.addWidget(self._rb_general)
+        gen_hint = QLabel(t("wizard_general_desc"))
+        gen_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        lay.addWidget(gen_hint)
 
         lay.addStretch()
+        self._nav_row(lay, back_idx=3, next_text=t("wizard_finish"),
+                      next_cb=self._on_use_next)
         return page
+
+    def _on_use_next(self):
+        kind = "work" if self._rb_work.isChecked() else "general"
+        self._on_use_choice(kind)
 
     def _on_use_choice(self, kind: str):
         cfg = config.load()
