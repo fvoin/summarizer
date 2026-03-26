@@ -652,12 +652,12 @@ class _ModelRow(QWidget):
         lay.addWidget(self.status_label)
 
         self.dl_btn = QPushButton(t("model_download"))
-        self.dl_btn.setFixedWidth(80)
+        self.dl_btn.setMinimumWidth(70)
         self.dl_btn.clicked.connect(lambda: self.download_requested.emit(self.model_name))
         lay.addWidget(self.dl_btn)
 
         self.del_btn = QPushButton(t("model_delete"))
-        self.del_btn.setFixedWidth(56)
+        self.del_btn.setMinimumWidth(56)
         self.del_btn.setStyleSheet("color: #cc3333;")
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.model_name))
         self.del_btn.setVisible(False)
@@ -725,11 +725,13 @@ class SetupWizard(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("wizard_title"))
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(520)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         self._choice_cloud = True
         self._selected_local_model = "gpt-oss:20b"
+        self._selected_whisper = "medium"
+        self._download_workers: list = []
 
         from PyQt6.QtWidgets import QStackedWidget
         outer = QVBoxLayout(self)
@@ -737,10 +739,12 @@ class SetupWizard(QDialog):
         self._stack = QStackedWidget()
         outer.addWidget(self._stack)
 
-        self._stack.addWidget(self._build_step1())    # 0 — cloud vs local
-        self._stack.addWidget(self._build_step2a())    # 1 — cloud API key
-        self._stack.addWidget(self._build_step2b())    # 2 — local model
-        self._stack.addWidget(self._build_step3())     # 3 — use case
+        self._stack.addWidget(self._build_step_llm_type())   # 0 — cloud vs local
+        self._stack.addWidget(self._build_step_cloud())      # 1 — cloud API key
+        self._stack.addWidget(self._build_step_local())      # 2 — local model
+        self._stack.addWidget(self._build_step_whisper())    # 3 — whisper model
+        self._stack.addWidget(self._build_step_use_case())   # 4 — work vs general
+        self._stack.addWidget(self._build_step_download())   # 5 — download progress
 
     # ── shared helpers ────────────────────────────────────────────────
 
@@ -771,7 +775,7 @@ class SetupWizard(QDialog):
         s.setStyleSheet("background: #D1D1D6;")
         layout.addWidget(s)
 
-    def _nav_row(self, layout: QVBoxLayout, back=False, next_text="", next_cb=None,
+    def _nav_row(self, layout: QVBoxLayout, back_idx=-1, next_text="", next_cb=None,
                  skip=False, skip_cb=None, next_enabled=True):
         row = QHBoxLayout()
         if skip:
@@ -783,14 +787,14 @@ class SetupWizard(QDialog):
             )
             sb.clicked.connect(skip_cb or self.reject)
             row.addWidget(sb)
-        if back:
+        if back_idx >= 0:
             bb = QPushButton(t("wizard_back"))
             bb.setStyleSheet(
                 f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
                 " font-size: 13px; padding: 8px 16px; }}"
                 f" QPushButton:hover {{ color: {_C['text']}; }}"
             )
-            bb.clicked.connect(lambda: self._stack.setCurrentIndex(0))
+            bb.clicked.connect(lambda idx=back_idx: self._stack.setCurrentIndex(idx))
             row.addWidget(bb)
         row.addStretch()
         if next_text:
@@ -805,61 +809,52 @@ class SetupWizard(QDialog):
             self._last_next_btn = nb
         layout.addLayout(row)
 
-    # ── Step 1: Cloud vs Local ────────────────────────────────────────
+    # ── Step 0: Cloud vs Local (radio buttons) ────────────────────────
 
-    def _build_step1(self) -> QWidget:
+    def _build_step_llm_type(self) -> QWidget:
+        from PyQt6.QtWidgets import QRadioButton
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setSpacing(14)
+        lay.setSpacing(12)
         lay.setContentsMargins(28, 24, 28, 20)
 
         self._header(lay, t("wizard_title"), t("wizard_subtitle"))
         self._sep(lay)
         lay.addSpacing(4)
 
-        # Cloud card
-        cloud_btn = QPushButton()
-        cloud_btn.setStyleSheet(self._CARD_STYLE.format(
-            bg="white", border=_C["border"], hover=_C["primary"], hover_bg="rgba(74,144,217,0.05)"))
-        cloud_lay = QVBoxLayout(cloud_btn)
-        cloud_lay.setContentsMargins(4, 4, 4, 4)
-        ct = QLabel(f"☁️  <b>{t('wizard_cloud_title')}</b>")
-        ct.setStyleSheet("font-size: 15px; background: transparent;")
-        cloud_lay.addWidget(ct)
-        cd = QLabel(t("wizard_cloud_desc"))
-        cd.setWordWrap(True)
-        cd.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
-        cloud_lay.addWidget(cd)
-        cloud_btn.clicked.connect(lambda: self._on_type_choice(True))
-        lay.addWidget(cloud_btn)
+        lbl = QLabel(t("wizard_llm_type_title"))
+        lbl.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {_C['text']};")
+        lay.addWidget(lbl)
 
-        # Local card
-        local_btn = QPushButton()
-        local_btn.setStyleSheet(self._CARD_STYLE.format(
-            bg="white", border=_C["border"], hover=_C["accent"], hover_bg="rgba(123,104,238,0.05)"))
-        local_lay = QVBoxLayout(local_btn)
-        local_lay.setContentsMargins(4, 4, 4, 4)
-        lt = QLabel(f"⚡  <b>{t('wizard_local_title')}</b>")
-        lt.setStyleSheet("font-size: 15px; background: transparent;")
-        local_lay.addWidget(lt)
-        ld = QLabel(t("wizard_local_desc"))
-        ld.setWordWrap(True)
-        ld.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']}; background: transparent;")
-        local_lay.addWidget(ld)
-        local_btn.clicked.connect(lambda: self._on_type_choice(False))
-        lay.addWidget(local_btn)
+        self._rb_cloud = QRadioButton(t("wizard_cloud_title"))
+        self._rb_cloud.setChecked(True)
+        self._rb_cloud.setStyleSheet("font-size: 13px;")
+        lay.addWidget(self._rb_cloud)
+        cloud_hint = QLabel(t("wizard_cloud_desc"))
+        cloud_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        lay.addWidget(cloud_hint)
+
+        lay.addSpacing(6)
+
+        self._rb_local = QRadioButton(t("wizard_local_title"))
+        self._rb_local.setStyleSheet("font-size: 13px;")
+        lay.addWidget(self._rb_local)
+        local_hint = QLabel(t("wizard_local_desc"))
+        local_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        lay.addWidget(local_hint)
 
         lay.addStretch()
-        self._nav_row(lay, skip=True)
+        self._nav_row(lay, skip=True, next_text=t("wizard_next"),
+                      next_cb=self._on_type_next)
         return page
 
-    def _on_type_choice(self, cloud: bool):
-        self._choice_cloud = cloud
-        self._stack.setCurrentIndex(1 if cloud else 2)
+    def _on_type_next(self):
+        self._choice_cloud = self._rb_cloud.isChecked()
+        self._stack.setCurrentIndex(1 if self._choice_cloud else 2)
 
-    # ── Step 2a: Cloud API key ────────────────────────────────────────
+    # ── Step 1: Cloud API key ─────────────────────────────────────────
 
-    def _build_step2a(self) -> QWidget:
+    def _build_step_cloud(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setSpacing(14)
@@ -884,7 +879,7 @@ class SetupWizard(QDialog):
         lay.addWidget(hint)
 
         lay.addStretch()
-        self._nav_row(lay, back=True, next_text=t("wizard_next"),
+        self._nav_row(lay, back_idx=0, next_text=t("wizard_next"),
                       next_cb=self._on_cloud_next, next_enabled=False)
         self._cloud_next_btn = self._last_next_btn
         self._key_input.textChanged.connect(
@@ -900,11 +895,11 @@ class SetupWizard(QDialog):
         if not cfg.get("model"):
             cfg["model"] = "gemini-3-flash-preview"
         config.save(cfg)
-        self._stack.setCurrentIndex(3)
+        self._stack.setCurrentIndex(3)  # → whisper
 
-    # ── Step 2b: Local model selection ────────────────────────────────
+    # ── Step 2: Local model selection ─────────────────────────────────
 
-    def _build_step2b(self) -> QWidget:
+    def _build_step_local(self) -> QWidget:
         from PyQt6.QtWidgets import QRadioButton, QButtonGroup
         page = QWidget()
         lay = QVBoxLayout(page)
@@ -941,7 +936,7 @@ class SetupWizard(QDialog):
             lay.addWidget(row_w)
 
         lay.addStretch()
-        self._nav_row(lay, back=True, next_text=t("wizard_next"),
+        self._nav_row(lay, back_idx=0, next_text=t("wizard_next"),
                       next_cb=self._on_local_next)
         return page
 
@@ -953,11 +948,81 @@ class SetupWizard(QDialog):
         cfg = config.load()
         cfg["model"] = self._selected_local_model
         config.save(cfg)
-        self._stack.setCurrentIndex(3)
+        self._stack.setCurrentIndex(3)  # → whisper
 
-    # ── Step 3: Work vs General ───────────────────────────────────────
+    # ── Step 3: Whisper model selection ───────────────────────────────
 
-    def _build_step3(self) -> QWidget:
+    def _build_step_whisper(self) -> QWidget:
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(10)
+        lay.setContentsMargins(28, 24, 28, 20)
+
+        self._header(lay, t("wizard_whisper_title"))
+        sub = QLabel(t("wizard_whisper_desc"))
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setWordWrap(True)
+        sub.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        lay.addWidget(sub)
+        self._sep(lay)
+
+        self._whisper_bg = QButtonGroup(self)
+        for name, info in config.WHISPER_MODELS.items():
+            row_w = QWidget()
+            row_h = QHBoxLayout(row_w)
+            row_h.setContentsMargins(8, 3, 8, 3)
+            rb = QRadioButton()
+            rb.setChecked(name == "medium")
+            rb._wm_name = name
+            self._whisper_bg.addButton(rb)
+            row_h.addWidget(rb)
+            size_mb = info["size_mb"]
+            size_str = f"{size_mb} MB" if size_mb < 1000 else f"{size_mb / 1000:.1f} GB"
+            quality = info["quality"]
+            lbl_text = f"<b>{name}</b>  —  {quality}  ({size_str})"
+            is_bundled = config.is_model_downloaded(name) and name == "base"
+            if is_bundled:
+                bnd_color = _C["text_secondary"]
+                bnd_text = t("wizard_bundled")
+                lbl_text += f"  <span style='color:{bnd_color}; font-size: 11px;'>({bnd_text})</span>"
+            if name == "medium":
+                color = _C["success"]
+                rec = t("wizard_recommended")
+                lbl_text += f"  <span style='color:{color}; font-size: 11px;'> ★ {rec}</span>"
+            lbl = QLabel(lbl_text)
+            row_h.addWidget(lbl, 1)
+            lay.addWidget(row_w)
+
+        lay.addStretch()
+        back_idx = 1 if self._choice_cloud else 2
+        # back_idx changes dynamically, so connect with a lambda
+        self._nav_row(lay, next_text=t("wizard_next"), next_cb=self._on_whisper_next)
+        # Add a manual back button that goes to the right page
+        nav_layout = lay.itemAt(lay.count() - 1).layout()
+        bb = QPushButton(t("wizard_back"))
+        bb.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+            " font-size: 13px; padding: 8px 16px; }}"
+            f" QPushButton:hover {{ color: {_C['text']}; }}"
+        )
+        bb.clicked.connect(lambda: self._stack.setCurrentIndex(1 if self._choice_cloud else 2))
+        nav_layout.insertWidget(0, bb)
+        return page
+
+    def _on_whisper_next(self):
+        for btn in self._whisper_bg.buttons():
+            if btn.isChecked():
+                self._selected_whisper = btn._wm_name
+                break
+        cfg = config.load()
+        cfg["whisper_model"] = self._selected_whisper
+        config.save(cfg)
+        self._stack.setCurrentIndex(4)  # → use case
+
+    # ── Step 4: Work vs General ───────────────────────────────────────
+
+    def _build_step_use_case(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
         lay.setSpacing(14)
@@ -1022,7 +1087,159 @@ class SetupWizard(QDialog):
 
         cfg["instruction_profiles"] = profiles
         config.save(cfg)
-        self.accept()
+
+        # Check what needs downloading
+        needs = self._pending_downloads()
+        if needs:
+            self._populate_download_page(needs)
+            self._stack.setCurrentIndex(5)
+        else:
+            self.accept()
+
+    # ── Step 5: Download progress ─────────────────────────────────────
+
+    def _build_step_download(self) -> QWidget:
+        page = QWidget()
+        lay = QVBoxLayout(page)
+        lay.setSpacing(12)
+        lay.setContentsMargins(28, 24, 28, 20)
+
+        self._header(lay, t("wizard_download_title"))
+        self._sep(lay)
+
+        self._dl_desc = QLabel(t("wizard_download_desc"))
+        self._dl_desc.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        lay.addWidget(self._dl_desc)
+
+        self._dl_list_layout = QVBoxLayout()
+        self._dl_list_layout.setSpacing(6)
+        lay.addLayout(self._dl_list_layout)
+
+        lay.addStretch()
+
+        self._dl_status = QLabel()
+        self._dl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dl_status.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {_C['primary']};")
+        lay.addWidget(self._dl_status)
+
+        btn_row = QHBoxLayout()
+        skip_btn = QPushButton(t("wizard_skip"))
+        skip_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+            " font-size: 13px; padding: 8px 16px; }}"
+            f" QPushButton:hover {{ color: {_C['text']}; }}"
+        )
+        skip_btn.clicked.connect(self.accept)
+        btn_row.addWidget(skip_btn)
+        btn_row.addStretch()
+        self._dl_action_btn = QPushButton(t("wizard_download_now"))
+        self._dl_action_btn.setMinimumHeight(36)
+        self._dl_action_btn.setMinimumWidth(140)
+        self._dl_action_btn.setStyleSheet(_BTN_PRIMARY)
+        self._dl_action_btn.clicked.connect(self._start_downloads)
+        btn_row.addWidget(self._dl_action_btn)
+        lay.addLayout(btn_row)
+        return page
+
+    def _pending_downloads(self) -> list:
+        """Return list of (type, key, label) for models that need downloading."""
+        needs = []
+        wm = self._selected_whisper
+        if not config.is_model_downloaded(wm):
+            info = config.WHISPER_MODELS.get(wm, {})
+            sz = info.get("size_mb", 0)
+            sz_str = f"{sz} MB" if sz < 1000 else f"{sz / 1000:.1f} GB"
+            needs.append(("whisper", wm, f"Whisper {wm} ({sz_str})"))
+        if not self._choice_cloud:
+            key = self._selected_local_model
+            info = config.LOCAL_LLM_MODELS.get(key, {})
+            if not config.is_local_llm_downloaded(key):
+                needs.append(("ollama", key, f"{info.get('display', key)} ({info.get('size_gb', '?')} GB)"))
+        return needs
+
+    def _populate_download_page(self, needs: list):
+        # Clear existing rows
+        while self._dl_list_layout.count():
+            item = self._dl_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._dl_rows = {}
+        for dtype, key, label in needs:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(4, 2, 4, 2)
+            name_lbl = QLabel(f"• {label}")
+            name_lbl.setStyleSheet("font-size: 13px;")
+            rl.addWidget(name_lbl, 1)
+            status_lbl = QLabel("—")
+            status_lbl.setStyleSheet(f"color: {_C['text_muted']}; font-size: 12px;")
+            rl.addWidget(status_lbl)
+            prog = QProgressBar()
+            prog.setRange(0, 0)
+            prog.setFixedWidth(100)
+            prog.setFixedHeight(8)
+            prog.setTextVisible(False)
+            prog.setVisible(False)
+            rl.addWidget(prog)
+            self._dl_rows[key] = {"type": dtype, "status": status_lbl, "progress": prog}
+            self._dl_list_layout.addWidget(row)
+        self._dl_status.clear()
+        self._dl_action_btn.setEnabled(True)
+        self._dl_action_btn.setText(t("wizard_download_now"))
+
+    def _start_downloads(self):
+        self._dl_action_btn.setEnabled(False)
+        self._dl_action_btn.setText(t("wizard_downloading_models"))
+        self._dl_pending = len(self._dl_rows)
+        self._dl_errors = []
+        for key, info in self._dl_rows.items():
+            info["status"].setText(t("model_downloading"))
+            info["status"].setStyleSheet("color: #b08800;")
+            info["progress"].setVisible(True)
+            if info["type"] == "whisper":
+                worker = ModelDownloadWorker(key)
+                worker.finished.connect(lambda name: self._on_dl_item_done(name))
+                worker.error.connect(lambda name, msg: self._on_dl_item_error(name, msg))
+                self._download_workers.append(worker)
+                worker.start()
+            else:
+                worker = LocalLLMDownloadWorker(key)
+                worker.finished.connect(lambda name: self._on_dl_item_done(name))
+                worker.error.connect(lambda name, msg: self._on_dl_item_error(name, msg))
+                self._download_workers.append(worker)
+                worker.start()
+
+    def _on_dl_item_done(self, key: str):
+        if key in self._dl_rows:
+            self._dl_rows[key]["status"].setText(t("model_ready"))
+            self._dl_rows[key]["status"].setStyleSheet(f"color: {_C['success']}; font-weight: bold;")
+            self._dl_rows[key]["progress"].setVisible(False)
+        self._dl_pending -= 1
+        if self._dl_pending <= 0:
+            self._on_all_downloads_done()
+
+    def _on_dl_item_error(self, key: str, msg: str):
+        if key in self._dl_rows:
+            self._dl_rows[key]["status"].setText(t("model_error"))
+            self._dl_rows[key]["status"].setStyleSheet("color: #cc3333;")
+            self._dl_rows[key]["status"].setToolTip(msg)
+            self._dl_rows[key]["progress"].setVisible(False)
+        self._dl_errors.append(msg)
+        self._dl_pending -= 1
+        if self._dl_pending <= 0:
+            self._on_all_downloads_done()
+
+    def _on_all_downloads_done(self):
+        if self._dl_errors:
+            self._dl_status.setText(t("wizard_download_error", error=self._dl_errors[0][:80]))
+            self._dl_status.setStyleSheet(f"font-size: 12px; color: {_C['danger']};")
+        else:
+            self._dl_status.setText(t("wizard_download_complete"))
+            self._dl_status.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {_C['success']};")
+        self._dl_action_btn.setText(t("wizard_finish"))
+        self._dl_action_btn.setEnabled(True)
+        self._dl_action_btn.clicked.disconnect()
+        self._dl_action_btn.clicked.connect(self.accept)
 
 
 class _OllamaChatWorker(QThread):
@@ -1171,20 +1388,20 @@ class _LocalLLMRow(QWidget):
         )
 
         self.test_btn = QPushButton(t("model_test"))
-        self.test_btn.setFixedWidth(44)
+        self.test_btn.setMinimumWidth(40)
         self.test_btn.setStyleSheet(_flat_btn % _C["primary"])
         self.test_btn.clicked.connect(lambda: self.test_requested.emit(self.model_key))
         self.test_btn.setVisible(False)
         lay.addWidget(self.test_btn)
 
         self.dl_btn = QPushButton(t("model_download"))
-        self.dl_btn.setFixedWidth(76)
+        self.dl_btn.setMinimumWidth(70)
         self.dl_btn.setStyleSheet(_flat_btn % _C["primary"])
         self.dl_btn.clicked.connect(lambda: self.download_requested.emit(self.model_key))
         lay.addWidget(self.dl_btn)
 
         self.del_btn = QPushButton(t("model_delete"))
-        self.del_btn.setFixedWidth(56)
+        self.del_btn.setMinimumWidth(56)
         self.del_btn.setStyleSheet(_flat_btn % "#cc3333")
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.model_key))
         self.del_btn.setVisible(False)
@@ -1431,12 +1648,12 @@ class SettingsDialog(QDialog):
         profile_row.addWidget(self.profile_combo, 1)
 
         new_profile_btn = QPushButton(t("new_btn"))
-        new_profile_btn.setFixedWidth(50)
+        new_profile_btn.setMinimumWidth(50)
         new_profile_btn.clicked.connect(self._new_profile)
         profile_row.addWidget(new_profile_btn)
 
         self.del_profile_btn = QPushButton(t("delete_btn"))
-        self.del_profile_btn.setFixedWidth(56)
+        self.del_profile_btn.setMinimumWidth(56)
         self.del_profile_btn.clicked.connect(self._delete_profile)
         profile_row.addWidget(self.del_profile_btn)
         instr_outer.addLayout(profile_row)

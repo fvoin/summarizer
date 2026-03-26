@@ -233,16 +233,14 @@ _STRINGS: Dict[str, Dict[str, str]] = {
         "en": "Let's set up your AI model to get started.",
         "ru": "Давайте настроим модель ИИ для начала работы.",
     },
-    "wizard_cloud_title":       {"en": "Cloud LLM",                           "ru": "Облачная модель"},
-    "wizard_cloud_desc": {
-        "en": "Use Gemini, GPT, Claude via API.\nFast, high quality. Requires an API key (Gemini is free).",
-        "ru": "Gemini, GPT, Claude через API.\nБыстро и качественно. Нужен API-ключ (Gemini бесплатно).",
-    },
-    "wizard_local_title":       {"en": "Local LLM",                           "ru": "Локальная модель"},
-    "wizard_local_desc": {
-        "en": "Run AI models on your Mac.\nFully offline, no API key needed. Requires 8+ GB RAM.",
-        "ru": "ИИ-модели прямо на вашем Mac.\nПолностью оффлайн, без API-ключа. Нужно 8+ ГБ RAM.",
-    },
+    "wizard_cloud_title":       {"en": "Cloud LLM — Gemini, GPT, Claude via API",
+                                 "ru": "Облачная модель — Gemini, GPT, Claude через API"},
+    "wizard_cloud_desc":        {"en": "Fast, high quality. Requires an API key (Gemini is free).",
+                                 "ru": "Быстро и качественно. Нужен API-ключ (Gemini бесплатно)."},
+    "wizard_local_title":       {"en": "Local LLM — runs on your Mac, fully offline",
+                                 "ru": "Локальная модель — работает на вашем Mac, полностью оффлайн"},
+    "wizard_local_desc":        {"en": "No API key needed. Requires 8+ GB RAM.",
+                                 "ru": "Без API-ключа. Нужно 8+ ГБ RAM."},
     "wizard_cloud_step_title":  {"en": "Cloud API Setup",                     "ru": "Настройка облачного API"},
     "wizard_gemini_label": {
         "en": "Gemini API Key  <span style='color:#6e6e73; font-weight:400;'>(recommended — free)</span>",
@@ -285,6 +283,19 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     # ── File dialog titles ───────────────────────────────────────────────
     "open_audio_title":         {"en": "Open Audio File",                     "ru": "Открыть аудиофайл"},
     "open_transcript_title":    {"en": "Open Transcript",                     "ru": "Открыть транскрипт"},
+
+    "wizard_whisper_title":     {"en": "Choose a Whisper Model",               "ru": "Выберите модель Whisper"},
+    "wizard_whisper_desc":      {"en": "Whisper converts speech to text locally. Larger models are more accurate but slower.",
+                                 "ru": "Whisper распознаёт речь локально. Большие модели точнее, но медленнее."},
+    "wizard_bundled":           {"en": "bundled",                              "ru": "в комплекте"},
+    "wizard_download_title":    {"en": "Download Models",                      "ru": "Загрузка моделей"},
+    "wizard_download_desc":     {"en": "The following models need to be downloaded:",
+                                 "ru": "Необходимо загрузить следующие модели:"},
+    "wizard_download_now":      {"en": "Download Now",                         "ru": "Скачать сейчас"},
+    "wizard_downloading_models": {"en": "Downloading…",                        "ru": "Загрузка…"},
+    "wizard_download_complete": {"en": "All downloads complete!",              "ru": "Все загрузки завершены!"},
+    "wizard_download_error":    {"en": "Download error: {error}",              "ru": "Ошибка загрузки: {error}"},
+    "wizard_llm_type_title":    {"en": "Choose AI Model Type",                 "ru": "Выберите тип модели ИИ"},
 
     # ── OllamaChatDialog ─────────────────────────────────────────────────
     "chat_title":               {"en": "Chat with {name}",                    "ru": "Чат с {name}"},
