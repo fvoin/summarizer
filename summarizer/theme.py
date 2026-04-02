@@ -11,8 +11,12 @@ import tempfile
 from pathlib import Path
 from typing import Dict
 
-from PyQt6.QtGui import QColor, QPalette
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QRect, QSize, Qt
+from PyQt6.QtGui import QColor, QPainter, QPalette, QPen
+from PyQt6.QtWidgets import (
+    QApplication, QComboBox, QStyle, QStyleOptionViewItem,
+    QStyledItemDelegate,
+)
 
 # Temp dir for generated arrow images (persists for app lifetime)
 _ARROW_DIR = Path(tempfile.mkdtemp(prefix="summarizer_arrows_"))
@@ -42,6 +46,8 @@ _LIGHT: Dict[str, str] = {
     "hover_overlay":    "rgba(0, 0, 0, 0.06)",
     "pressed_overlay":  "rgba(0, 0, 0, 0.12)",
     "selection":        "rgba(74, 144, 217, 0.25)",
+    "highlight":        "#4A90D9",
+    "highlight_text":   "#ffffff",
     "progress_bg":      "#D5D5DA",
     "chat_assistant":   "#555555",
 }
@@ -67,6 +73,8 @@ _DARK: Dict[str, str] = {
     "hover_overlay":    "rgba(255, 255, 255, 0.08)",
     "pressed_overlay":  "rgba(255, 255, 255, 0.14)",
     "selection":        "rgba(91, 159, 230, 0.30)",
+    "highlight":        "#5B9FE6",
+    "highlight_text":   "#ffffff",
     "progress_bg":      "#444444",
     "chat_assistant":   "#B0B0B0",
 }
@@ -92,6 +100,8 @@ _NORD: Dict[str, str] = {
     "hover_overlay":    "rgba(216, 222, 233, 0.08)",
     "pressed_overlay":  "rgba(216, 222, 233, 0.14)",
     "selection":        "rgba(136, 192, 208, 0.30)",
+    "highlight":        "#88C0D0",
+    "highlight_text":   "#2E3440",
     "progress_bg":      "#4C566A",
     "chat_assistant":   "#D8DEE9",
 }
@@ -128,8 +138,8 @@ def apply_palette(app: QApplication) -> None:
     p.setColor(QPalette.ColorRole.Text, QColor(C["text"]))
     p.setColor(QPalette.ColorRole.Button, QColor(C["surface"]))
     p.setColor(QPalette.ColorRole.ButtonText, QColor(C["text"]))
-    p.setColor(QPalette.ColorRole.Highlight, QColor(C["primary"]))
-    p.setColor(QPalette.ColorRole.HighlightedText, QColor(C["primary_text"]))
+    p.setColor(QPalette.ColorRole.Highlight, QColor(C["highlight"]))
+    p.setColor(QPalette.ColorRole.HighlightedText, QColor(C["highlight_text"]))
     p.setColor(QPalette.ColorRole.ToolTipBase, QColor(C["surface"]))
     p.setColor(QPalette.ColorRole.ToolTipText, QColor(C["text"]))
     p.setColor(QPalette.ColorRole.PlaceholderText, QColor(C["text_muted"]))
@@ -146,7 +156,7 @@ def apply_palette(app: QApplication) -> None:
 
 
 def _arrow_svg_path() -> str:
-    """Generate a small SVG arrow and return its file path for QSS image: url()."""
+    """Generate a small SVG down-arrow and return its file path for QSS."""
     color = C["text_secondary"]
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6">'
@@ -158,6 +168,26 @@ def _arrow_svg_path() -> str:
     return str(path).replace("\\", "/")
 
 
+def _spin_arrow_paths() -> tuple[str, str]:
+    """Generate small SVG up/down arrows for QSpinBox, return (up_path, down_path)."""
+    color = C["text_secondary"]
+    up_svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="5" viewBox="0 0 8 5">'
+        f'<polygon points="0,5 8,5 4,0" fill="{color}"/>'
+        '</svg>'
+    )
+    down_svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="5" viewBox="0 0 8 5">'
+        f'<polygon points="0,0 8,0 4,5" fill="{color}"/>'
+        '</svg>'
+    )
+    up_path = _ARROW_DIR / "spin_up.svg"
+    down_path = _ARROW_DIR / "spin_down.svg"
+    up_path.write_text(up_svg)
+    down_path.write_text(down_svg)
+    return str(up_path).replace("\\", "/"), str(down_path).replace("\\", "/")
+
+
 # ---------------------------------------------------------------------------
 # Derived QSS helpers  (call after apply())
 # ---------------------------------------------------------------------------
@@ -165,22 +195,24 @@ def _arrow_svg_path() -> str:
 def btn_primary() -> str:
     return f"""
         QPushButton {{
-            background-color: {C['primary']};
-            color: {C['primary_text']};
-            border: none;
+            background-color: transparent;
+            color: {C['primary']};
+            border: 1.5px solid {C['primary']};
             border-radius: 8px;
             padding: 10px 20px;
             font-size: 15px;
             font-weight: 600;
         }}
         QPushButton:hover {{
-            background-color: {C['primary_hover']};
+            background-color: {C['primary']};
+            color: {C['primary_text']};
         }}
         QPushButton:pressed {{
             background-color: {C['primary_pressed']};
+            color: {C['primary_text']};
         }}
         QPushButton:disabled {{
-            background-color: {C['border']};
+            border-color: {C['border']};
             color: {C['text_muted']};
         }}
     """
@@ -189,16 +221,17 @@ def btn_primary() -> str:
 def btn_recording() -> str:
     return f"""
         QPushButton {{
-            background-color: {C['danger']};
-            color: {C['primary_text']};
-            border: none;
+            background-color: transparent;
+            color: {C['danger']};
+            border: 1.5px solid {C['danger']};
             border-radius: 8px;
             padding: 10px 20px;
             font-size: 15px;
             font-weight: 600;
         }}
         QPushButton:hover {{
-            background-color: {C['danger_hover']};
+            background-color: {C['danger']};
+            color: {C['primary_text']};
         }}
     """
 
@@ -319,20 +352,7 @@ def window_style() -> str:
         QComboBox QAbstractItemView {{
             background-color: {C['surface']};
             color: {C['text']};
-            border: none;
-            selection-background-color: {C['primary']};
-            selection-color: {C['primary_text']};
             outline: none;
-            padding: 4px;
-        }}
-        QComboBox QAbstractItemView::item {{
-            padding: 4px 8px;
-            border-radius: 4px;
-            min-height: 22px;
-        }}
-        QComboBox QAbstractItemView::item:selected {{
-            background-color: {C['primary']};
-            color: {C['primary_text']};
         }}
         QSpinBox {{
             background-color: {C['surface']};
@@ -340,6 +360,25 @@ def window_style() -> str:
             border: 1px solid {C['border']};
             border-radius: 6px;
             padding: 4px 8px;
+        }}
+        QSpinBox::up-button, QSpinBox::down-button {{
+            border: none;
+            background: transparent;
+            width: 16px;
+        }}
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+            background: {C['hover_overlay']};
+            border-radius: 3px;
+        }}
+        QSpinBox::up-arrow {{
+            image: url({_spin_arrow_paths()[0]});
+            width: 8px;
+            height: 5px;
+        }}
+        QSpinBox::down-arrow {{
+            image: url({_spin_arrow_paths()[1]});
+            width: 8px;
+            height: 5px;
         }}
         QCheckBox {{
             color: {C['text']};
@@ -523,3 +562,63 @@ def _hex_to_rgb(hex_color: str) -> str:
     """Convert '#RRGGBB' to 'R, G, B'."""
     h = hex_color.lstrip("#")
     return f"{int(h[0:2], 16)}, {int(h[2:4], 16)}, {int(h[4:6], 16)}"
+
+
+# ---------------------------------------------------------------------------
+# FlatComboBox — custom combo with proper popup rendering
+# ---------------------------------------------------------------------------
+
+class _HighlightDelegate(QStyledItemDelegate):
+    """Paints combo popup items with flat highlight from the active theme."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        rect: QRect = option.rect
+
+        if is_selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(C["highlight"]))
+            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), 4, 4)
+            painter.setPen(QColor(C["highlight_text"]))
+        else:
+            painter.setPen(QColor(C["text"]))
+
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        text_rect = rect.adjusted(8, 0, -8, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:
+        s = super().sizeHint(option, index)
+        return QSize(s.width(), max(s.height(), 28))
+
+
+class FlatComboBox(QComboBox):
+    """QComboBox with a flat popup — no 3D frame, proper highlight colours."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setItemDelegate(_HighlightDelegate(self))
+
+    def showPopup(self):
+        # Remove frame from the list view itself
+        view = self.view()
+        view.setFrameShape(view.Shape.NoFrame)
+        view.setStyleSheet(f"background-color: {C['surface']}; border: none;")
+
+        super().showPopup()
+
+        popup = view.window()
+        if popup and popup is not self.window():
+            popup.setWindowFlags(
+                popup.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint
+            )
+            popup.setStyleSheet(f"""
+                background-color: {C['surface']};
+                border: 1px solid {C['border']};
+                border-radius: 6px;
+            """)
+            popup.show()

@@ -40,26 +40,16 @@ _logger = logging.getLogger("app")
 
 # ── Vector icon helpers ──────────────────────────────────────────────────
 
-def _make_mic_icon(size: int = 64, color: QColor = QColor("#4A90D9")) -> QIcon:
-    """Draw a simple microphone icon."""
+def _make_rec_dot_icon(size: int = 64, color: QColor = QColor("#D94A4A")) -> QIcon:
+    """Draw a filled red circle (record indicator)."""
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(color, size * 0.06, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-    p.setPen(pen)
+    p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(color)
-
-    cx, cy = size / 2, size * 0.35
-    rw, rh = size * 0.18, size * 0.28
-    p.drawRoundedRect(int(cx - rw), int(cy - rh), int(rw * 2), int(rh * 2), rw, rw)
-
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    arc_w, arc_h = size * 0.3, size * 0.3
-    p.drawArc(int(cx - arc_w), int(cy - arc_h * 0.3), int(arc_w * 2), int(arc_h * 2), 0, -180 * 16)
-
-    p.drawLine(int(cx), int(cy + rh + arc_h * 0.7), int(cx), int(size * 0.85))
-    p.drawLine(int(cx - size * 0.15), int(size * 0.85), int(cx + size * 0.15), int(size * 0.85))
+    margin = size * 0.2
+    p.drawEllipse(int(margin), int(margin), int(size - margin * 2), int(size - margin * 2))
     p.end()
     return QIcon(pm)
 
@@ -697,7 +687,7 @@ class SetupWizard(QDialog):
             nb = QPushButton(next_text)
             nb.setMinimumHeight(36)
             nb.setMinimumWidth(120)
-            nb.setStyleSheet(theme.btn_primary())
+            nb.setStyleSheet(theme.btn_secondary())
             nb.setEnabled(next_enabled)
             if next_cb:
                 nb.clicked.connect(next_cb)
@@ -1025,7 +1015,7 @@ class SetupWizard(QDialog):
         self._dl_action_btn = QPushButton(t("wizard_download_now"))
         self._dl_action_btn.setMinimumHeight(36)
         self._dl_action_btn.setMinimumWidth(140)
-        self._dl_action_btn.setStyleSheet(theme.btn_primary())
+        self._dl_action_btn.setStyleSheet(theme.btn_secondary())
         self._dl_action_btn.clicked.connect(self._start_downloads)
         btn_row.addWidget(self._dl_action_btn)
         lay.addLayout(btn_row)
@@ -1190,9 +1180,7 @@ class OllamaChatDialog(QDialog):
         hlay.addWidget(self._input, 1)
 
         self._send_btn = QPushButton(t("chat_send"))
-        self._send_btn.setStyleSheet(theme.btn_primary() + """
-            QPushButton { padding: 6px 14px; font-size: 13px; border-radius: 6px; }
-        """)
+        self._send_btn.setStyleSheet(theme.btn_secondary())
         self._send_btn.clicked.connect(self._send)
         hlay.addWidget(self._send_btn)
         vlay.addLayout(hlay)
@@ -1524,7 +1512,7 @@ class SettingsDialog(QDialog):
 
         profile_row = QHBoxLayout()
         profile_row.setSpacing(6)
-        self.profile_combo = QComboBox()
+        self.profile_combo = theme.FlatComboBox()
         self._reload_profile_combo()
         self.profile_combo.currentIndexChanged.connect(self._on_profile_selected)
         profile_row.addWidget(self.profile_combo, 1)
@@ -1567,7 +1555,7 @@ class SettingsDialog(QDialog):
         self.silence_spin.setSuffix(" sec")
         general_form.addRow(t("silence_timeout_label"), self.silence_spin)
 
-        self.device_combo = QComboBox()
+        self.device_combo = theme.FlatComboBox()
         self.device_combo.addItem(t("device_default"), None)
         for dev in AudioRecorder.list_devices():
             self.device_combo.addItem(dev["name"], dev["id"])
@@ -1596,7 +1584,7 @@ class SettingsDialog(QDialog):
         general_form.addRow(t("recordings_dir_label"), self.recordings_edit)
 
         # ── Theme selector ───────────────────────────────────────────────
-        self.theme_combo = QComboBox()
+        self.theme_combo = theme.FlatComboBox()
         _theme_keys = theme.THEME_NAMES
         _theme_labels = {"light": t("theme_light"), "dark": t("theme_dark"), "nord": t("theme_nord")}
         for key in _theme_keys:
@@ -2103,7 +2091,7 @@ class MainWindow(QMainWindow):
         named_lbl = QLabel(t("context_label"))
         named_lbl.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
         ctx_row.addWidget(named_lbl)
-        self.context_combo = QComboBox()
+        self.context_combo = theme.FlatComboBox()
         self.context_combo.setMinimumWidth(180)
         self._refresh_contexts()
         ctx_row.addWidget(self.context_combo, 1)
@@ -2172,7 +2160,7 @@ class MainWindow(QMainWindow):
         profile_lbl = QLabel(t("instructions_label"))
         profile_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']};")
         profile_row.addWidget(profile_lbl)
-        self.profile_select = QComboBox()
+        self.profile_select = theme.FlatComboBox()
         self.profile_select.setMinimumWidth(140)
         self._reload_main_profile_combo()
         self.profile_select.currentIndexChanged.connect(self._on_main_profile_changed)
@@ -2182,7 +2170,7 @@ class MainWindow(QMainWindow):
 
         # ── record button ──
         root.addSpacing(6)
-        self._mic_icon = _make_mic_icon(48, QColor(C["primary_text"]))
+        self._mic_icon = _make_rec_dot_icon(48, QColor(C["danger"]))
         self._stop_icon = _make_stop_icon(48)
         self.record_btn = QPushButton(t("start_recording"))
         self.record_btn.setIcon(self._mic_icon)
