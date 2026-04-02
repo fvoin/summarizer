@@ -2373,8 +2373,6 @@ class MainWindow(QMainWindow):
         self._tray.rec_action.triggered.connect(self._toggle_recording)
         self._tray.settings_action.triggered.connect(self._open_settings)
         self._tray.quit_action.triggered.connect(self._tray_quit)
-        self._tray.activated.connect(self._on_tray_activated)
-
         if config.load().get("menubar_enabled", False):
             self._tray.show()
 
@@ -2386,10 +2384,6 @@ class MainWindow(QMainWindow):
     def _tray_quit(self):
         self._tray.hide()
         QApplication.quit()
-
-    def _on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            self._tray_show()
 
     def _refresh_tray(self):
         """Show/hide tray based on current config."""
