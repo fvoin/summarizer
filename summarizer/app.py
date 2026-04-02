@@ -3218,6 +3218,15 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Summarizer")
+
+    # Single-instance guard
+    from PyQt6.QtCore import QLockFile
+    lock_path = str(Path.home() / ".summarizer" / "summarizer.lock")
+    lock = QLockFile(lock_path)
+    if not lock.tryLock(100):
+        _logger.warning("Another instance is already running, exiting.")
+        sys.exit(0)
+
     app.setStyle("Fusion")
     theme.apply_palette(app)
 
