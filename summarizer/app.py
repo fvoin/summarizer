@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTextEdit, QComboBox, QLineEdit,
     QFileDialog, QMessageBox, QDialog, QFormLayout, QSpinBox,
-    QGroupBox, QSplitter, QProgressBar, QSizePolicy,
+    QGroupBox, QSplitter, QProgressBar, QSizePolicy, QSystemTrayIcon,
 )
 
 import logging
@@ -34,6 +34,8 @@ from .updater import check_for_update, download_and_open
 from .i18n import t
 from . import theme
 from .theme import C
+from .tray import TrayIcon
+from .agent import AgentPoller, PostCompleteWorker
 
 _logger = logging.getLogger("app")
 
@@ -1623,6 +1625,52 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(general_tab, t("tab_general"))
 
+        # ── TAB: Agent ────────────────────────────────────────────────────
+        agent_tab = QWidget()
+        agent_form = QFormLayout(agent_tab)
+        agent_form.setSpacing(10)
+        agent_form.setContentsMargins(12, 12, 12, 12)
+
+        self.menubar_check = QCheckBox(t("menubar_check"))
+        self.menubar_check.setChecked(bool(self.cfg.get("menubar_enabled", False)))
+        agent_form.addRow(t("menubar_label"), self.menubar_check)
+
+        agent_form.addRow(QLabel(""))  # spacer
+
+        agent_group = QGroupBox(t("agent_group"))
+        agent_vlay = QVBoxLayout(agent_group)
+        agent_inner = QFormLayout()
+        agent_inner.setSpacing(8)
+
+        self.agent_url_edit = QLineEdit(self.cfg.get("agent_url", ""))
+        self.agent_url_edit.setPlaceholderText(t("agent_url_placeholder"))
+        agent_inner.addRow(t("agent_url_label"), self.agent_url_edit)
+
+        self.agent_token_edit = QLineEdit(self.cfg.get("agent_token", ""))
+        self.agent_token_edit.setPlaceholderText(t("agent_token_placeholder"))
+        self.agent_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        agent_inner.addRow(t("agent_token_label"), self.agent_token_edit)
+
+        self.agent_enabled_check = QCheckBox(t("agent_enabled_check"))
+        self.agent_enabled_check.setChecked(bool(self.cfg.get("agent_enabled", False)))
+        agent_inner.addRow("", self.agent_enabled_check)
+
+        agent_vlay.addLayout(agent_inner)
+
+        test_row = QHBoxLayout()
+        self._agent_test_btn = QPushButton(t("agent_test_btn"))
+        self._agent_test_btn.clicked.connect(self._test_agent_connection)
+        test_row.addWidget(self._agent_test_btn)
+        self._agent_test_status = QLabel("")
+        self._agent_test_status.setWordWrap(True)
+        self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']};")
+        test_row.addWidget(self._agent_test_status, 1)
+        agent_vlay.addLayout(test_row)
+
+        agent_form.addRow(agent_group)
+
+        tabs.addTab(agent_tab, t("agent_group"))
+
         # ── Save / Cancel row ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
         save_btn = QPushButton(t("save_btn"))
@@ -2015,8 +2063,46 @@ class SettingsDialog(QDialog):
         self.cfg["input_device"] = self.device_combo.currentData()
         self.cfg["recordings_dir"] = self.recordings_edit.text().strip()
         self.cfg["theme"] = self.theme_combo.currentData() or "light"
+        self.cfg["menubar_enabled"] = self.menubar_check.isChecked()
+        self.cfg["agent_url"] = self.agent_url_edit.text().strip().rstrip("/")
+        self.cfg["agent_token"] = self.agent_token_edit.text().strip()
+        self.cfg["agent_enabled"] = self.agent_enabled_check.isChecked()
         config.save(self.cfg)
         self.accept()
+
+    def _test_agent_connection(self):
+        import json
+        import ssl
+        import urllib.request
+        import certifi
+
+        url = self.agent_url_edit.text().strip().rstrip("/")
+        token = self.agent_token_edit.text().strip()
+        if not url or not token:
+            self._agent_test_status.setText(t("agent_test_fail", error="URL and token required"))
+            self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['error']};")
+            return
+
+        self._agent_test_btn.setEnabled(False)
+        self._agent_test_status.setText("…")
+        QApplication.processEvents()
+
+        try:
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            req = urllib.request.Request(
+                f"{url}/api/auto-record/upcoming",
+                headers={"Authorization": f"Bearer {token}", "User-Agent": "Summarizer"},
+            )
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                data = json.loads(resp.read().decode())
+            count = len(data) if isinstance(data, list) else 0
+            self._agent_test_status.setText(t("agent_test_ok", count=count))
+            self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['success']};")
+        except Exception as e:
+            self._agent_test_status.setText(t("agent_test_fail", error=str(e)[:100]))
+            self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['error']};")
+        finally:
+            self._agent_test_btn.setEnabled(True)
 
 
 # ── Main window ──────────────────────────────────────────────────────────
@@ -2054,8 +2140,12 @@ class MainWindow(QMainWindow):
         self._saved_summary: Optional[str] = None
         self._summary_context_name: Optional[str] = None
         self._auto_stop_signal.connect(self._on_auto_stop)
+        self._agent_poller: Optional[AgentPoller] = None
+        self._agent_meeting: Optional[dict] = None
         self._build_ui()
         self._preload_model()
+        self._setup_tray()
+        self._start_agent_if_enabled()
 
     # ── UI construction ──────────────────────────────────────────────
 
@@ -2275,6 +2365,106 @@ class MainWindow(QMainWindow):
         self.result_text.textChanged.connect(self._on_result_text_changed)
         self._apply_mode_ui()
 
+    # ── tray icon ────────────────────────────────────────────────────
+
+    def _setup_tray(self):
+        self._tray = TrayIcon(self)
+        self._tray.show_action.triggered.connect(self._tray_show)
+        self._tray.rec_action.triggered.connect(self._toggle_recording)
+        self._tray.settings_action.triggered.connect(self._open_settings)
+        self._tray.quit_action.triggered.connect(self._tray_quit)
+        self._tray.activated.connect(self._on_tray_activated)
+
+        if config.load().get("menubar_enabled", False):
+            self._tray.show()
+
+    def _tray_show(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_quit(self):
+        self._tray.hide()
+        QApplication.quit()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._tray_show()
+
+    def _refresh_tray(self):
+        """Show/hide tray based on current config."""
+        if config.load().get("menubar_enabled", False):
+            self._tray.show()
+        else:
+            self._tray.hide()
+
+    def closeEvent(self, event):
+        if self._tray.isVisible():
+            self.hide()
+            event.ignore()
+        else:
+            event.accept()
+
+    # ── agent integration ────────────────────────────────────────────
+
+    def _start_agent_if_enabled(self):
+        cfg = config.load()
+        if cfg.get("agent_enabled") and cfg.get("agent_url") and cfg.get("agent_token"):
+            if self._agent_poller is None:
+                self._agent_poller = AgentPoller(self)
+                self._agent_poller.meeting_armed.connect(self._on_agent_meeting)
+                self._agent_poller.error.connect(self._on_agent_error)
+                self._agent_poller.start()
+                _logger.info("Agent poller started")
+
+    def _stop_agent(self):
+        if self._agent_poller:
+            self._agent_poller.stop()
+            self._agent_poller.wait(3000)
+            self._agent_poller = None
+            _logger.info("Agent poller stopped")
+
+    def _restart_agent(self):
+        self._stop_agent()
+        self._start_agent_if_enabled()
+
+    def _on_agent_meeting(self, meeting: dict):
+        """A meeting is ready to record — start recording automatically."""
+        if self._recorder and self._recorder.is_recording():
+            _logger.info("Already recording, skipping agent meeting %s", meeting.get("id"))
+            return
+        self._agent_meeting = meeting
+        title = meeting.get("title", "Meeting")
+        _logger.info("Agent: auto-recording '%s'", title)
+        self._tray.showMessage("Summarizer", t("agent_notify_recording", title=title))
+        # Start recording via the normal flow
+        self._toggle_recording()
+
+    def _on_agent_error(self, msg: str):
+        _logger.error("Agent error: %s", msg)
+
+    def _agent_upload_transcript(self, transcript: str):
+        """Upload transcript to backend after auto-record finishes."""
+        if not self._agent_meeting:
+            return
+        meeting = self._agent_meeting
+        self._agent_meeting = None
+        worker = PostCompleteWorker(transcript, meeting, self)
+        worker.finished.connect(lambda data: self._on_agent_upload_done(data, meeting))
+        worker.error.connect(lambda e: self._on_agent_upload_error(e, meeting))
+        self._track_worker(worker)
+        worker.start()
+
+    def _on_agent_upload_done(self, data: dict, meeting: dict):
+        title = meeting.get("title", "Meeting")
+        _logger.info("Agent upload done for '%s': %s", title, data)
+        self._tray.showMessage("Summarizer", t("agent_notify_uploaded", title=title))
+
+    def _on_agent_upload_error(self, error: str, meeting: dict):
+        title = meeting.get("title", "Meeting")
+        _logger.error("Agent upload failed for '%s': %s", title, error)
+        self._tray.showMessage("Summarizer", t("agent_notify_error", error=error[:80]))
+
     def _is_transcribe_only(self) -> bool:
         return bool(config.load().get("transcribe_only", False))
 
@@ -2453,6 +2643,7 @@ class MainWindow(QMainWindow):
         self.record_btn.setStyleSheet(theme.btn_recording())
         self._rec_timer.start()
         self._set_status(t("status_recording"), "recording")
+        self._tray.set_recording(True)
 
         # Start real-time transcription
         self._rt_model_ready = False
@@ -2632,6 +2823,7 @@ class MainWindow(QMainWindow):
         self.record_btn.setText(t("start_recording"))
         self.record_btn.setIcon(self._mic_icon)
         self.record_btn.setStyleSheet(theme.btn_primary())
+        self._tray.set_recording(False)
 
     # ── real-time transcription ───────────────────────────────────────
 
@@ -2773,6 +2965,11 @@ class MainWindow(QMainWindow):
             self._current_transcript_path = str(txt_path)
         except Exception:
             pass
+
+        # If this was an agent-triggered recording, upload transcript
+        if self._agent_meeting:
+            self._agent_meeting["_duration"] = getattr(self, "_pending_duration", 0) or 0
+            self._agent_upload_transcript(transcript)
 
         if self._is_transcribe_only():
             self._finish_with_transcript(transcript)
@@ -2918,6 +3115,9 @@ class MainWindow(QMainWindow):
             self.update_ctx_btn.setVisible(False)
             self._saved_summary = None
             self._summary_context_name = None
+            self._tray.set_processing()
+        else:
+            self._tray.set_idle()
 
     @staticmethod
     def _mrkdwn_to_html(text: str) -> str:
@@ -2972,6 +3172,8 @@ class MainWindow(QMainWindow):
                 self.profile_select.setCurrentIndex(idx)
             self.profile_select.blockSignals(False)
             self._profile_select_blocked = False
+        self._refresh_tray()
+        self._restart_agent()
 
 
 # ── entry point ──────────────────────────────────────────────────────────

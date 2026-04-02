@@ -197,6 +197,10 @@ _DEFAULTS = {
     "input_device": None,
     "recordings_dir": "",
     "theme": "light",
+    "menubar_enabled": False,
+    "agent_url": "",
+    "agent_token": "",
+    "agent_enabled": False,
 }
 
 WHISPER_MODELS = {

@@ -306,6 +306,35 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "chat_title":               {"en": "Chat with {name}",                    "ru": "Чат с {name}"},
     "chat_placeholder":         {"en": "Type a message…",                     "ru": "Введите сообщение…"},
     "chat_send":                {"en": "Send",                                "ru": "Отправить"},
+
+    # ── Menu bar / Tray ─────────────────────────────────────────────────
+    "tray_show":                {"en": "Show Summarizer",                     "ru": "Показать Summarizer"},
+    "tray_start_rec":           {"en": "Start Recording",                     "ru": "Начать запись"},
+    "tray_stop_rec":            {"en": "Stop Recording",                      "ru": "Остановить запись"},
+    "tray_settings":            {"en": "Settings…",                           "ru": "Настройки…"},
+    "tray_quit":                {"en": "Quit",                                "ru": "Выход"},
+    "tray_recording":           {"en": "Recording…",                          "ru": "Запись…"},
+    "tray_processing":          {"en": "Processing…",                         "ru": "Обработка…"},
+
+    # ── Menu bar settings ───────────────────────────────────────────────
+    "menubar_label":            {"en": "Menu bar:",                           "ru": "Строка меню:"},
+    "menubar_check":            {"en": "Enable menu bar icon",                "ru": "Показывать в строке меню"},
+
+    # ── Agent settings ──────────────────────────────────────────────────
+    "agent_group":              {"en": "Recording Agent",                     "ru": "Агент записи"},
+    "agent_url_label":          {"en": "Backend URL:",                        "ru": "URL бэкенда:"},
+    "agent_url_placeholder":    {"en": "https://app.example.com",             "ru": "https://app.example.com"},
+    "agent_token_label":        {"en": "Token:",                              "ru": "Токен:"},
+    "agent_token_placeholder":  {"en": "Paste token from web app settings",   "ru": "Вставьте токен из настроек веб-приложения"},
+    "agent_enabled_check":      {"en": "Auto-record upcoming meetings",       "ru": "Автозапись предстоящих встреч"},
+    "agent_test_btn":           {"en": "Test Connection",                     "ru": "Проверить соединение"},
+    "agent_test_ok":            {"en": "Connected! {count} upcoming meeting(s).", "ru": "Подключено! Встреч в ближайшее время: {count}."},
+    "agent_test_fail":          {"en": "Connection failed: {error}",          "ru": "Ошибка соединения: {error}"},
+    "agent_notify_armed":       {"en": "Will record: {title}",               "ru": "Будет записано: {title}"},
+    "agent_notify_recording":   {"en": "Recording: {title}",                 "ru": "Запись: {title}"},
+    "agent_notify_uploaded":    {"en": "Uploaded: {title}",                   "ru": "Загружено: {title}"},
+    "agent_notify_noshow":      {"en": "No voice detected, skipped: {title}", "ru": "Голос не обнаружен, пропущено: {title}"},
+    "agent_notify_error":       {"en": "Agent error: {error}",               "ru": "Ошибка агента: {error}"},
 }
 
 
