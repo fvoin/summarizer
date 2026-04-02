@@ -6,7 +6,7 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.15.0"
+APP_VERSION = "1.15.1"
 
 _CONFIG_DIR = Path.home() / ".summarizer"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
@@ -196,7 +196,7 @@ _DEFAULTS = {
     "context_profiles": {},
     "input_device": None,
     "recordings_dir": "",
-    "theme": "",
+    "theme": "light",
 }
 
 WHISPER_MODELS = {

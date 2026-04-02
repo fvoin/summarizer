@@ -32,99 +32,10 @@ from .summarizer import (
 )
 from .updater import check_for_update, download_and_open
 from .i18n import t
+from . import theme
+from .theme import C
 
 _logger = logging.getLogger("app")
-
-# ── Color palette & shared styles ────────────────────────────────────────
-
-_C = {
-    "primary":       "#4A90D9",
-    "primary_hover": "#3A7BC8",
-    "primary_text":  "#ffffff",
-    "accent":        "#7B68EE",
-    "danger":        "#D94A4A",
-    "danger_hover":  "#C43A3A",
-    "bg":            "#ECECEC",
-    "surface":       "#ffffff",
-    "border":        "#D1D1D6",
-    "text":          "#1D1D1F",
-    "text_secondary":"#6E6E73",
-    "text_muted":    "#AEAEB2",
-    "success":       "#2D8A4E",
-    "warning":       "#B08800",
-}
-
-_BTN_PRIMARY = f"""
-    QPushButton {{
-        background-color: {_C['primary']};
-        color: {_C['primary_text']};
-        border: none;
-        border-radius: 8px;
-        padding: 10px 20px;
-        font-size: 15px;
-        font-weight: 600;
-    }}
-    QPushButton:hover {{
-        background-color: {_C['primary_hover']};
-    }}
-    QPushButton:pressed {{
-        background-color: #2E6BB5;
-    }}
-    QPushButton:disabled {{
-        background-color: {_C['border']};
-        color: {_C['text_muted']};
-    }}
-"""
-
-_BTN_RECORDING = f"""
-    QPushButton {{
-        background-color: {_C['danger']};
-        color: {_C['primary_text']};
-        border: none;
-        border-radius: 8px;
-        padding: 10px 20px;
-        font-size: 15px;
-        font-weight: 600;
-    }}
-    QPushButton:hover {{
-        background-color: {_C['danger_hover']};
-    }}
-"""
-
-_BTN_SECONDARY = f"""
-    QPushButton {{
-        background-color: transparent;
-        color: {_C['primary']};
-        border: none;
-        border-radius: 6px;
-        padding: 7px 14px;
-        font-size: 13px;
-        font-weight: 500;
-    }}
-    QPushButton:hover {{
-        background-color: rgba(74, 144, 217, 0.1);
-    }}
-    QPushButton:pressed {{
-        background-color: rgba(74, 144, 217, 0.18);
-    }}
-    QPushButton:disabled {{
-        color: {_C['text_muted']};
-    }}
-"""
-
-_WINDOW_STYLE = f"""
-    QProgressBar {{
-        background-color: #D5D5DA;
-        border: none;
-        border-radius: 4px;
-        height: 6px;
-        text-align: center;
-    }}
-    QProgressBar::chunk {{
-        background-color: {_C['primary']};
-        border-radius: 4px;
-    }}
-"""
 
 
 # ── Vector icon helpers ──────────────────────────────────────────────────
@@ -658,7 +569,7 @@ class _ModelRow(QWidget):
 
         self.del_btn = QPushButton(t("model_delete"))
         self.del_btn.setMinimumWidth(56)
-        self.del_btn.setStyleSheet("color: #cc3333;")
+        self.del_btn.setStyleSheet(f"color: {C['error']};")
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.model_name))
         self.del_btn.setVisible(False)
         lay.addWidget(self.del_btn)
@@ -674,13 +585,13 @@ class _ModelRow(QWidget):
     def _set_downloaded(self, downloaded: bool):
         if downloaded:
             self.status_label.setText(t("model_ready"))
-            self.status_label.setStyleSheet("color: #2d8a4e; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {C['success']}; font-weight: bold;")
             self.dl_btn.setVisible(False)
             self.del_btn.setVisible(True)
             self.progress_bar.setVisible(False)
         else:
             self.status_label.setText(t("not_downloaded"))
-            self.status_label.setStyleSheet("color: #888;")
+            self.status_label.setStyleSheet(f"color: {C['text_muted']};")
             self.dl_btn.setVisible(True)
             self.del_btn.setVisible(False)
 
@@ -689,7 +600,7 @@ class _ModelRow(QWidget):
         self.del_btn.setVisible(False)
         self.progress_bar.setVisible(True)
         self.status_label.setText(t("model_downloading"))
-        self.status_label.setStyleSheet("color: #b08800;")
+        self.status_label.setStyleSheet(f"color: {C['warning']};")
 
     def set_download_done(self):
         self.progress_bar.setVisible(False)
@@ -700,27 +611,12 @@ class _ModelRow(QWidget):
         self.dl_btn.setVisible(True)
         self.del_btn.setVisible(False)
         self.status_label.setText(t("model_error"))
-        self.status_label.setStyleSheet("color: #cc3333;")
+        self.status_label.setStyleSheet(f"color: {C['error']};")
         self.status_label.setToolTip(msg)
 
 
 class SetupWizard(QDialog):
     """Multi-step first-run setup wizard."""
-
-    _CARD_STYLE = """
-        QPushButton {{
-            background: {bg};
-            border: 2px solid {border};
-            border-radius: 12px;
-            padding: 18px 16px;
-            text-align: left;
-            font-size: 13px;
-        }}
-        QPushButton:hover {{
-            border-color: {hover};
-            background: {hover_bg};
-        }}
-    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -760,19 +656,19 @@ class SetupWizard(QDialog):
         if title_text:
             tl = QLabel(title_text)
             tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            tl.setStyleSheet(f"font-size: 19px; font-weight: 700; color: {_C['primary']};")
+            tl.setStyleSheet(f"font-size: 19px; font-weight: 700; color: {C['primary']};")
             layout.addWidget(tl)
         if sub_text:
             sl = QLabel(sub_text)
             sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             sl.setWordWrap(True)
-            sl.setStyleSheet(f"font-size: 13px; color: {_C['text_secondary']};")
+            sl.setStyleSheet(f"font-size: 13px; color: {C['text_secondary']};")
             layout.addWidget(sl)
 
     def _sep(self, layout: QVBoxLayout):
         s = QWidget()
         s.setFixedHeight(1)
-        s.setStyleSheet("background: #D1D1D6;")
+        s.setStyleSheet(f"background: {C['border']};")
         layout.addWidget(s)
 
     def _nav_row(self, layout: QVBoxLayout, back_idx=-1, next_text="", next_cb=None,
@@ -781,18 +677,18 @@ class SetupWizard(QDialog):
         if skip:
             sb = QPushButton(t("wizard_skip"))
             sb.setStyleSheet(
-                f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+                f"QPushButton {{ background: transparent; border: none; color: {C['text_secondary']};"
                 " font-size: 13px; padding: 8px 16px; }}"
-                f" QPushButton:hover {{ color: {_C['text']}; }}"
+                f" QPushButton:hover {{ color: {C['text']}; }}"
             )
             sb.clicked.connect(skip_cb or self.reject)
             row.addWidget(sb)
         if back_idx >= 0:
             bb = QPushButton(t("wizard_back"))
             bb.setStyleSheet(
-                f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+                f"QPushButton {{ background: transparent; border: none; color: {C['text_secondary']};"
                 " font-size: 13px; padding: 8px 16px; }}"
-                f" QPushButton:hover {{ color: {_C['text']}; }}"
+                f" QPushButton:hover {{ color: {C['text']}; }}"
             )
             bb.clicked.connect(lambda idx=back_idx: self._stack.setCurrentIndex(idx))
             row.addWidget(bb)
@@ -801,7 +697,7 @@ class SetupWizard(QDialog):
             nb = QPushButton(next_text)
             nb.setMinimumHeight(36)
             nb.setMinimumWidth(120)
-            nb.setStyleSheet(_BTN_PRIMARY)
+            nb.setStyleSheet(theme.btn_primary())
             nb.setEnabled(next_enabled)
             if next_cb:
                 nb.clicked.connect(next_cb)
@@ -823,7 +719,7 @@ class SetupWizard(QDialog):
         lay.addSpacing(4)
 
         lbl = QLabel(t("wizard_llm_type_title"))
-        lbl.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {_C['primary']};")
+        lbl.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {C['primary']};")
         lay.addWidget(lbl)
 
         self._rb_cloud = QRadioButton(t("wizard_cloud_title"))
@@ -831,7 +727,7 @@ class SetupWizard(QDialog):
         self._rb_cloud.setStyleSheet("font-size: 13px;")
         lay.addWidget(self._rb_cloud)
         cloud_hint = QLabel(t("wizard_cloud_desc"))
-        cloud_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        cloud_hint.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin-left: 24px;")
         lay.addWidget(cloud_hint)
 
         lay.addSpacing(6)
@@ -840,7 +736,7 @@ class SetupWizard(QDialog):
         self._rb_local.setStyleSheet("font-size: 13px;")
         lay.addWidget(self._rb_local)
         local_hint = QLabel(t("wizard_local_desc"))
-        local_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        local_hint.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin-left: 24px;")
         lay.addWidget(local_hint)
 
         lay.addStretch()
@@ -873,7 +769,7 @@ class SetupWizard(QDialog):
         self._key_input.setEchoMode(QLineEdit.EchoMode.Password)
         lay.addWidget(self._key_input)
 
-        hint = QLabel(t("wizard_key_hint", color=_C["primary"]))
+        hint = QLabel(t("wizard_key_hint", color=C["primary"]))
         hint.setOpenExternalLinks(True)
         hint.setStyleSheet("font-size: 11px;")
         lay.addWidget(hint)
@@ -909,7 +805,7 @@ class SetupWizard(QDialog):
         self._header(lay, t("wizard_local_step_title"))
         sub = QLabel(t("wizard_local_step_desc"))
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        sub.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
         lay.addWidget(sub)
         self._sep(lay)
 
@@ -928,7 +824,7 @@ class SetupWizard(QDialog):
             qual = info["quality"]
             lbl_text = f"<b>{disp}</b>  —  {qual}  ({sz} GB)"
             if key == "gpt-oss:20b":
-                color = _C["success"]
+                color = C["success"]
                 rec = t("wizard_recommended")
                 lbl_text += f"  <span style='color:{color}; font-size: 11px;'> ★ {rec}</span>"
             lbl = QLabel(lbl_text)
@@ -963,7 +859,7 @@ class SetupWizard(QDialog):
         sub = QLabel(t("wizard_whisper_desc"))
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
-        sub.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        sub.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
         lay.addWidget(sub)
         self._sep(lay)
 
@@ -983,11 +879,11 @@ class SetupWizard(QDialog):
             lbl_text = f"<b>{name}</b>  —  {quality}  ({size_str})"
             is_bundled = config.is_model_downloaded(name) and name == "base"
             if is_bundled:
-                bnd_color = _C["text_secondary"]
+                bnd_color = C["text_secondary"]
                 bnd_text = t("wizard_bundled")
                 lbl_text += f"  <span style='color:{bnd_color}; font-size: 11px;'>({bnd_text})</span>"
             if name == "medium":
-                color = _C["success"]
+                color = C["success"]
                 rec = t("wizard_recommended")
                 lbl_text += f"  <span style='color:{color}; font-size: 11px;'> ★ {rec}</span>"
             lbl = QLabel(lbl_text)
@@ -1002,9 +898,9 @@ class SetupWizard(QDialog):
         nav_layout = lay.itemAt(lay.count() - 1).layout()
         bb = QPushButton(t("wizard_back"))
         bb.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+            f"QPushButton {{ background: transparent; border: none; color: {C['text_secondary']};"
             " font-size: 13px; padding: 8px 16px; }}"
-            f" QPushButton:hover {{ color: {_C['text']}; }}"
+            f" QPushButton:hover {{ color: {C['text']}; }}"
         )
         bb.clicked.connect(lambda: self._stack.setCurrentIndex(1 if self._choice_cloud else 2))
         nav_layout.insertWidget(0, bb)
@@ -1038,7 +934,7 @@ class SetupWizard(QDialog):
         self._rb_work.setStyleSheet("font-size: 13px;")
         lay.addWidget(self._rb_work)
         work_hint = QLabel(t("wizard_work_desc"))
-        work_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        work_hint.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin-left: 24px;")
         lay.addWidget(work_hint)
 
         lay.addSpacing(6)
@@ -1047,7 +943,7 @@ class SetupWizard(QDialog):
         self._rb_general.setStyleSheet("font-size: 13px;")
         lay.addWidget(self._rb_general)
         gen_hint = QLabel(t("wizard_general_desc"))
-        gen_hint.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin-left: 24px;")
+        gen_hint.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin-left: 24px;")
         lay.addWidget(gen_hint)
 
         lay.addStretch()
@@ -1102,7 +998,7 @@ class SetupWizard(QDialog):
         self._sep(lay)
 
         self._dl_desc = QLabel(t("wizard_download_desc"))
-        self._dl_desc.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        self._dl_desc.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
         lay.addWidget(self._dl_desc)
 
         self._dl_list_layout = QVBoxLayout()
@@ -1113,15 +1009,15 @@ class SetupWizard(QDialog):
 
         self._dl_status = QLabel()
         self._dl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._dl_status.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {_C['primary']};")
+        self._dl_status.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {C['primary']};")
         lay.addWidget(self._dl_status)
 
         btn_row = QHBoxLayout()
         skip_btn = QPushButton(t("wizard_skip"))
         skip_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; border: none; color: {_C['text_secondary']};"
+            f"QPushButton {{ background: transparent; border: none; color: {C['text_secondary']};"
             " font-size: 13px; padding: 8px 16px; }}"
-            f" QPushButton:hover {{ color: {_C['text']}; }}"
+            f" QPushButton:hover {{ color: {C['text']}; }}"
         )
         skip_btn.clicked.connect(self.accept)
         btn_row.addWidget(skip_btn)
@@ -1129,7 +1025,7 @@ class SetupWizard(QDialog):
         self._dl_action_btn = QPushButton(t("wizard_download_now"))
         self._dl_action_btn.setMinimumHeight(36)
         self._dl_action_btn.setMinimumWidth(140)
-        self._dl_action_btn.setStyleSheet(_BTN_PRIMARY)
+        self._dl_action_btn.setStyleSheet(theme.btn_primary())
         self._dl_action_btn.clicked.connect(self._start_downloads)
         btn_row.addWidget(self._dl_action_btn)
         lay.addLayout(btn_row)
@@ -1166,7 +1062,7 @@ class SetupWizard(QDialog):
             name_lbl.setStyleSheet("font-size: 13px;")
             rl.addWidget(name_lbl, 1)
             status_lbl = QLabel("—")
-            status_lbl.setStyleSheet(f"color: {_C['text_muted']}; font-size: 12px;")
+            status_lbl.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
             rl.addWidget(status_lbl)
             prog = QProgressBar()
             prog.setRange(0, 0)
@@ -1188,7 +1084,7 @@ class SetupWizard(QDialog):
         self._dl_errors = []
         for key, info in self._dl_rows.items():
             info["status"].setText(t("model_downloading"))
-            info["status"].setStyleSheet("color: #b08800;")
+            info["status"].setStyleSheet(f"color: {C['warning']};")
             info["progress"].setVisible(True)
             if info["type"] == "whisper":
                 worker = ModelDownloadWorker(key)
@@ -1206,7 +1102,7 @@ class SetupWizard(QDialog):
     def _on_dl_item_done(self, key: str):
         if key in self._dl_rows:
             self._dl_rows[key]["status"].setText(t("model_ready"))
-            self._dl_rows[key]["status"].setStyleSheet(f"color: {_C['success']}; font-weight: bold;")
+            self._dl_rows[key]["status"].setStyleSheet(f"color: {C['success']}; font-weight: bold;")
             self._dl_rows[key]["progress"].setVisible(False)
         self._dl_pending -= 1
         if self._dl_pending <= 0:
@@ -1215,7 +1111,7 @@ class SetupWizard(QDialog):
     def _on_dl_item_error(self, key: str, msg: str):
         if key in self._dl_rows:
             self._dl_rows[key]["status"].setText(t("model_error"))
-            self._dl_rows[key]["status"].setStyleSheet("color: #cc3333;")
+            self._dl_rows[key]["status"].setStyleSheet(f"color: {C['error']};")
             self._dl_rows[key]["status"].setToolTip(msg)
             self._dl_rows[key]["progress"].setVisible(False)
         self._dl_errors.append(msg)
@@ -1226,10 +1122,10 @@ class SetupWizard(QDialog):
     def _on_all_downloads_done(self):
         if self._dl_errors:
             self._dl_status.setText(t("wizard_download_error", error=self._dl_errors[0][:80]))
-            self._dl_status.setStyleSheet(f"font-size: 12px; color: {_C['danger']};")
+            self._dl_status.setStyleSheet(f"font-size: 12px; color: {C['danger']};")
         else:
             self._dl_status.setText(t("wizard_download_complete"))
-            self._dl_status.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {_C['success']};")
+            self._dl_status.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {C['success']};")
         self._dl_action_btn.setText(t("wizard_finish"))
         self._dl_action_btn.setEnabled(True)
         self._dl_action_btn.clicked.disconnect()
@@ -1296,7 +1192,7 @@ class OllamaChatDialog(QDialog):
         self._send_btn = QPushButton(t("chat_send"))
         self._send_btn.setFixedWidth(60)
         self._send_btn.setStyleSheet(
-            f"background: {_C['primary']}; color: white; border: none; border-radius: 4px; padding: 4px 8px;"
+            f"background: {C['primary']}; color: {C['primary_text']}; border: none; border-radius: 4px; padding: 4px 8px;"
         )
         self._send_btn.clicked.connect(self._send)
         hlay.addWidget(self._send_btn)
@@ -1308,8 +1204,8 @@ class OllamaChatDialog(QDialog):
             return
         self._input.clear()
         self._messages.append({"role": "user", "content": text})
-        self._chat_view.append(f"<p style='color:{_C['primary']};'><b>You:</b> {text}</p>")
-        self._chat_view.append(f"<p style='color:#555;'><b>{self._model}:</b> ")
+        self._chat_view.append(f"<p style='color:{C['primary']};'><b>You:</b> {text}</p>")
+        self._chat_view.append(f"<p style='color:{C['chat_assistant']};'><b>{self._model}:</b> ")
         self._set_busy(True)
 
         self._worker = _OllamaChatWorker(self._model, list(self._messages))
@@ -1328,7 +1224,7 @@ class OllamaChatDialog(QDialog):
         self._chat_view.ensureCursorVisible()
 
     def _on_error(self, msg: str):
-        self._chat_view.append(f"<p style='color:#cc3333;'>Error: {msg}</p>")
+        self._chat_view.append(f"<p style='color:{C['error']};'>Error: {msg}</p>")
 
     def _on_done(self):
         if self._assistant_buf:
@@ -1374,29 +1270,22 @@ class _LocalLLMRow(QWidget):
         self.status_label = QLabel()
         lay.addWidget(self.status_label)
 
-        _flat_btn = (
-            "QPushButton { background: transparent; border: none; border-radius: 4px;"
-            " padding: 2px 6px; font-size: 12px; font-weight: 500; color: %s; }"
-            " QPushButton:hover { background: rgba(0,0,0,0.06); }"
-            " QPushButton:pressed { background: rgba(0,0,0,0.12); }"
-        )
-
         self.test_btn = QPushButton(t("model_test"))
         self.test_btn.setMinimumWidth(40)
-        self.test_btn.setStyleSheet(_flat_btn % _C["primary"])
+        self.test_btn.setStyleSheet(theme.flat_btn())
         self.test_btn.clicked.connect(lambda: self.test_requested.emit(self.model_key))
         self.test_btn.setVisible(False)
         lay.addWidget(self.test_btn)
 
         self.dl_btn = QPushButton(t("model_download"))
         self.dl_btn.setMinimumWidth(70)
-        self.dl_btn.setStyleSheet(_flat_btn % _C["primary"])
+        self.dl_btn.setStyleSheet(theme.flat_btn())
         self.dl_btn.clicked.connect(lambda: self.download_requested.emit(self.model_key))
         lay.addWidget(self.dl_btn)
 
         self.del_btn = QPushButton(t("model_delete"))
         self.del_btn.setMinimumWidth(56)
-        self.del_btn.setStyleSheet(_flat_btn % "#cc3333")
+        self.del_btn.setStyleSheet(theme.flat_btn(C["error"]))
         self.del_btn.clicked.connect(lambda: self.delete_requested.emit(self.model_key))
         self.del_btn.setVisible(False)
         lay.addWidget(self.del_btn)
@@ -1412,14 +1301,14 @@ class _LocalLLMRow(QWidget):
     def _set_downloaded(self, downloaded: bool):
         if downloaded:
             self.status_label.setText(t("model_ready"))
-            self.status_label.setStyleSheet("color: #2d8a4e; font-weight: bold;")
+            self.status_label.setStyleSheet(f"color: {C['success']}; font-weight: bold;")
             self.dl_btn.setVisible(False)
             self.del_btn.setVisible(True)
             self.test_btn.setVisible(True)
             self.progress_bar.setVisible(False)
         else:
             self.status_label.setText(t("not_downloaded"))
-            self.status_label.setStyleSheet("color: #888;")
+            self.status_label.setStyleSheet(f"color: {C['text_muted']};")
             self.dl_btn.setVisible(True)
             self.del_btn.setVisible(False)
             self.test_btn.setVisible(False)
@@ -1430,7 +1319,7 @@ class _LocalLLMRow(QWidget):
         self.test_btn.setVisible(False)
         self.progress_bar.setVisible(True)
         self.status_label.setText(t("model_pulling"))
-        self.status_label.setStyleSheet("color: #b08800;")
+        self.status_label.setStyleSheet(f"color: {C['warning']};")
 
     def set_pull_done(self):
         self.progress_bar.setVisible(False)
@@ -1442,7 +1331,7 @@ class _LocalLLMRow(QWidget):
         self.del_btn.setVisible(False)
         self.test_btn.setVisible(False)
         self.status_label.setText(t("model_error"))
-        self.status_label.setStyleSheet("color: #cc3333;")
+        self.status_label.setStyleSheet(f"color: {C['error']};")
         self.status_label.setToolTip(msg)
 
 
@@ -1493,7 +1382,7 @@ class SettingsDialog(QDialog):
                     worker.error.connect(self._on_local_llm_error)
                     worker.status.connect(lambda s, r=row: (
                         r.status_label.setText(s[-60:]),
-                        r.status_label.setStyleSheet("color: #b08800;"),
+                        r.status_label.setStyleSheet(f"color: {C['warning']};"),
                     ))
             else:
                 self._local_llm_workers.pop(model_key, None)
@@ -1526,7 +1415,7 @@ class SettingsDialog(QDialog):
         current_model = self.cfg.get("model", "")
 
         cloud_lbl = QLabel(t("cloud_label"))
-        cloud_lbl.setStyleSheet("color: #6e6e73; font-size: 11px; font-weight: bold; margin-top: 4px;")
+        cloud_lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; font-weight: bold; margin-top: 4px;")
         llm_vlay.addWidget(cloud_lbl)
 
         self._cloud_rows: list[tuple[str, QRadioButton]] = []
@@ -1580,14 +1469,14 @@ class SettingsDialog(QDialog):
 
         # Local (Ollama) sub-section
         local_lbl = QLabel(t("local_label"))
-        local_lbl.setStyleSheet("color: #6e6e73; font-size: 11px; font-weight: bold; margin-top: 6px;")
+        local_lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; font-weight: bold; margin-top: 6px;")
         llm_vlay.addWidget(local_lbl)
 
         ollama_ok = config.is_ollama_available()
         if not ollama_ok:
             hint = QLabel(t("ollama_not_found"))
             hint.setOpenExternalLinks(True)
-            hint.setStyleSheet("color: #888; font-size: 10px; margin-left: 12px;")
+            hint.setStyleSheet(f"color: {C['text_muted']}; font-size: 10px; margin-left: 12px;")
             llm_vlay.addWidget(hint)
 
         pulled = config.list_ollama_models() if ollama_ok else []
@@ -1709,22 +1598,18 @@ class SettingsDialog(QDialog):
 
         # ── Theme selector ───────────────────────────────────────────────
         self.theme_combo = QComboBox()
-        self.theme_combo.addItem(t("theme_none"), "")
-        try:
-            from qt_material import list_themes
-            for theme_file in sorted(list_themes()):
-                name = theme_file.replace(".xml", "").replace("_", " ").title()
-                self.theme_combo.addItem(name, theme_file)
-        except ImportError:
-            pass
-        saved_theme = self.cfg.get("theme", "")
+        _theme_keys = theme.THEME_NAMES
+        _theme_labels = {"light": t("theme_light"), "dark": t("theme_dark"), "nord": t("theme_nord")}
+        for key in _theme_keys:
+            self.theme_combo.addItem(_theme_labels.get(key, key), key)
+        saved_theme = self.cfg.get("theme", "light")
         idx = self.theme_combo.findData(saved_theme)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
         theme_layout = QVBoxLayout()
         theme_layout.addWidget(self.theme_combo)
         theme_hint = QLabel(t("theme_restart_hint"))
-        theme_hint.setStyleSheet("color: #888; font-size: 11px;")
+        theme_hint.setStyleSheet(f"color: {C['text_muted']}; font-size: 11px;")
         theme_layout.addWidget(theme_hint)
         theme_widget = QWidget()
         theme_widget.setLayout(theme_layout)
@@ -1737,7 +1622,7 @@ class SettingsDialog(QDialog):
 
         update_row = QHBoxLayout()
         version_label = QLabel(f"v{config.APP_VERSION}")
-        version_label.setStyleSheet("color: #888; font-size: 12px;")
+        version_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
         update_row.addWidget(version_label)
         self._update_btn = QPushButton(t("check_updates"))
         self._update_btn.clicked.connect(self._check_for_updates)
@@ -1846,8 +1731,8 @@ class SettingsDialog(QDialog):
         later_btn = QPushButton(t("later_btn"))
         later_btn.setStyleSheet(
             "QPushButton { background: transparent; border: none;"
-            f" color: {_C['text_secondary']}; font-size: 13px; padding: 8px 14px; }}"
-            f" QPushButton:hover {{ color: {_C['text']}; }}"
+            f" color: {C['text_secondary']}; font-size: 13px; padding: 8px 14px; }}"
+            f" QPushButton:hover {{ color: {C['text']}; }}"
         )
         later_btn.clicked.connect(dlg.reject)
         btn_row.addWidget(later_btn)
@@ -1855,7 +1740,7 @@ class SettingsDialog(QDialog):
 
         quit_btn = QPushButton(t("quit_open_dmg"))
         quit_btn.setMinimumHeight(34)
-        quit_btn.setStyleSheet(_BTN_PRIMARY)
+        quit_btn.setStyleSheet(theme.btn_primary())
         quit_btn.clicked.connect(dlg.accept)
         btn_row.addWidget(quit_btn)
         lay.addLayout(btn_row)
@@ -2046,12 +1931,12 @@ class SettingsDialog(QDialog):
     def _set_ollama_install_hint(self, text: str):
         for row in self._local_llm_rows.values():
             row.status_label.setText(text)
-            row.status_label.setStyleSheet("color: #b08800;")
+            row.status_label.setStyleSheet(f"color: {C['warning']};")
 
     def _on_ollama_installed(self):
         for row in self._local_llm_rows.values():
             row.status_label.setText(t("ollama_ready"))
-            row.status_label.setStyleSheet("color: #2d8a4e; font-weight: bold;")
+            row.status_label.setStyleSheet(f"color: {C['success']}; font-weight: bold;")
         pending = getattr(self, "_pending_pull_model", None)
         if pending:
             self._do_pull_local_llm(pending)
@@ -2060,7 +1945,7 @@ class SettingsDialog(QDialog):
     def _on_ollama_install_error(self, msg: str):
         for row in self._local_llm_rows.values():
             row.status_label.setText(t("not_downloaded"))
-            row.status_label.setStyleSheet("color: #888;")
+            row.status_label.setStyleSheet(f"color: {C['text_muted']};")
         QMessageBox.critical(self, t("ollama_install_failed"), msg)
 
     def _do_pull_local_llm(self, model_key: str):
@@ -2073,7 +1958,7 @@ class SettingsDialog(QDialog):
         if row:
             worker.status.connect(lambda s, r=row: (
                 r.status_label.setText(s[-60:]),
-                r.status_label.setStyleSheet("color: #b08800;"),
+                r.status_label.setStyleSheet(f"color: {C['warning']};"),
             ))
         self._local_llm_workers[model_key] = worker
         worker.start()
@@ -2142,7 +2027,7 @@ class SettingsDialog(QDialog):
         self.cfg["silence_timeout"] = self.silence_spin.value()
         self.cfg["input_device"] = self.device_combo.currentData()
         self.cfg["recordings_dir"] = self.recordings_edit.text().strip()
-        self.cfg["theme"] = self.theme_combo.currentData() or ""
+        self.cfg["theme"] = self.theme_combo.currentData() or "light"
         config.save(self.cfg)
         self.accept()
 
@@ -2188,7 +2073,7 @@ class MainWindow(QMainWindow):
     # ── UI construction ──────────────────────────────────────────────
 
     def _build_ui(self):
-        self.setStyleSheet(_WINDOW_STYLE)
+        self.setStyleSheet(theme.window_style())
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -2200,23 +2085,15 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout()
         title = QLabel("Summarizer")
         title.setFont(QFont(".AppleSystemUIFont", 20, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {_C['primary']};")
+        title.setStyleSheet(f"color: {C['primary']};")
         top.addWidget(title)
         top.addStretch()
         settings_btn = QPushButton()
-        settings_btn.setIcon(_make_gear_icon(32, QColor(_C["accent"])))
+        settings_btn.setIcon(_make_gear_icon(32, QColor(C["accent"])))
         settings_btn.setIconSize(QSize(22, 22))
         settings_btn.setFixedSize(36, 36)
         settings_btn.setToolTip(t("settings_tooltip"))
-        settings_btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: rgba(0, 0, 0, 0.06);
-            }
-        """)
+        settings_btn.setStyleSheet(theme.ghost_btn())
         settings_btn.clicked.connect(self._open_settings)
         top.addWidget(settings_btn)
         root.addLayout(top)
@@ -2225,7 +2102,7 @@ class MainWindow(QMainWindow):
         # ── context section ──
         ctx_row = QHBoxLayout()
         named_lbl = QLabel(t("context_label"))
-        named_lbl.setStyleSheet(f"font-size: 12px; color: {_C['text_secondary']};")
+        named_lbl.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
         ctx_row.addWidget(named_lbl)
         self.context_combo = QComboBox()
         self.context_combo.setMinimumWidth(180)
@@ -2234,7 +2111,7 @@ class MainWindow(QMainWindow):
         add_ctx_btn = QPushButton("+")
         add_ctx_btn.setFixedSize(28, 28)
         add_ctx_btn.setToolTip(t("context_add_tooltip"))
-        add_ctx_btn.setStyleSheet(_BTN_SECONDARY + """
+        add_ctx_btn.setStyleSheet(theme.btn_secondary() + """
             QPushButton { font-size: 16px; font-weight: bold; padding: 0px; }
         """)
         add_ctx_btn.clicked.connect(self._add_context)
@@ -2243,8 +2120,8 @@ class MainWindow(QMainWindow):
         self._edit_ctx_btn = QPushButton("✏")
         self._edit_ctx_btn.setFixedSize(36, 36)
         self._edit_ctx_btn.setToolTip(t("context_edit_tooltip"))
-        self._edit_ctx_btn.setStyleSheet(_BTN_SECONDARY + """
-            QPushButton { font-size: 18px; padding: 0px; color: #b08800; }
+        self._edit_ctx_btn.setStyleSheet(theme.btn_secondary() + f"""
+            QPushButton {{ font-size: 18px; padding: 0px; color: {C['warning']}; }}
         """)
         self._edit_ctx_btn.clicked.connect(self._edit_context)
         self._edit_ctx_btn.setVisible(False)
@@ -2253,8 +2130,8 @@ class MainWindow(QMainWindow):
         self._del_ctx_btn = QPushButton("×")
         self._del_ctx_btn.setFixedSize(28, 28)
         self._del_ctx_btn.setToolTip(t("context_delete_tooltip"))
-        self._del_ctx_btn.setStyleSheet(_BTN_SECONDARY + """
-            QPushButton { font-size: 18px; font-weight: bold; padding: 0px; color: #cc3333; }
+        self._del_ctx_btn.setStyleSheet(theme.btn_secondary() + f"""
+            QPushButton {{ font-size: 18px; font-weight: bold; padding: 0px; color: {C['error']}; }}
         """)
         self._del_ctx_btn.clicked.connect(self._delete_context)
         self._del_ctx_btn.setVisible(False)
@@ -2263,7 +2140,7 @@ class MainWindow(QMainWindow):
         root.addLayout(ctx_row)
 
         self._gen_lbl = QLabel(t("general_context_label"))
-        self._gen_lbl.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin: 0;")
+        self._gen_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin: 0;")
         self._gen_lbl.setContentsMargins(0, 0, 0, 0)
         self._gen_lbl.setVisible(False)
         root.addWidget(self._gen_lbl)
@@ -2278,7 +2155,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self.general_ctx)
 
         self._mtg_lbl = QLabel(t("meeting_context_label"))
-        self._mtg_lbl.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']}; margin: 0;")
+        self._mtg_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin: 0;")
         self._mtg_lbl.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._mtg_lbl)
         self.meeting_ctx = QTextEdit()
@@ -2294,7 +2171,7 @@ class MainWindow(QMainWindow):
         profile_row = QHBoxLayout()
         profile_row.setSpacing(6)
         profile_lbl = QLabel(t("instructions_label"))
-        profile_lbl.setStyleSheet(f"font-size: 11px; color: {_C['text_secondary']};")
+        profile_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']};")
         profile_row.addWidget(profile_lbl)
         self.profile_select = QComboBox()
         self.profile_select.setMinimumWidth(140)
@@ -2306,13 +2183,13 @@ class MainWindow(QMainWindow):
 
         # ── record button ──
         root.addSpacing(6)
-        self._mic_icon = _make_mic_icon(48, QColor(_C["primary_text"]))
+        self._mic_icon = _make_mic_icon(48, QColor(C["primary_text"]))
         self._stop_icon = _make_stop_icon(48)
         self.record_btn = QPushButton(t("start_recording"))
         self.record_btn.setIcon(self._mic_icon)
         self.record_btn.setIconSize(QSize(22, 22))
         self.record_btn.setMinimumHeight(50)
-        self.record_btn.setStyleSheet(_BTN_PRIMARY)
+        self.record_btn.setStyleSheet(theme.btn_primary())
         self.record_btn.clicked.connect(self._toggle_recording)
         root.addWidget(self.record_btn)
 
@@ -2320,10 +2197,10 @@ class MainWindow(QMainWindow):
         file_row = QHBoxLayout()
         file_row.setSpacing(10)
         open_wav = QPushButton(t("summarize_audio"))
-        open_wav.setStyleSheet(_BTN_SECONDARY)
+        open_wav.setStyleSheet(theme.btn_secondary())
         open_wav.clicked.connect(self._open_audio)
         open_txt = QPushButton(t("summarize_transcript"))
-        open_txt.setStyleSheet(_BTN_SECONDARY)
+        open_txt.setStyleSheet(theme.btn_secondary())
         open_txt.clicked.connect(self._open_transcript)
         file_row.addWidget(open_wav)
         file_row.addWidget(open_txt)
@@ -2333,7 +2210,7 @@ class MainWindow(QMainWindow):
         self.drop_label = QLabel(t("drop_hint"))
         self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_label.setStyleSheet(f"""
-            color: {_C['text_muted']};
+            color: {C['text_muted']};
             font-size: 12px;
             padding: 2px;
         """)
@@ -2345,7 +2222,7 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(f"""
             background-color: transparent;
-            color: {_C['text_secondary']};
+            color: {C['text_secondary']};
             font-size: 12px;
             padding: 4px 0px;
         """)
@@ -2363,14 +2240,16 @@ class MainWindow(QMainWindow):
         self.result_text = QTextEdit()
         self.result_text.setPlaceholderText(t("summary_placeholder"))
         self.result_text.setMinimumHeight(120)
-        self.result_text.setStyleSheet("""
-            QTextEdit {
+        self.result_text.setStyleSheet(f"""
+            QTextEdit {{
                 border: none;
                 border-radius: 8px;
                 padding: 12px;
                 font-size: 13px;
-                selection-background-color: rgba(74, 144, 217, 0.25);
-            }
+                background-color: {C['surface']};
+                color: {C['text']};
+                selection-background-color: {C['selection']};
+            }}
         """)
         self.result_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root.addWidget(self.result_text, 1)
@@ -2379,15 +2258,15 @@ class MainWindow(QMainWindow):
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(10)
         self.copy_btn = QPushButton(t("copy_summary"))
-        self.copy_btn.setIcon(_make_copy_icon(24, QColor(_C["primary"])))
+        self.copy_btn.setIcon(_make_copy_icon(24, QColor(C["primary"])))
         self.copy_btn.setIconSize(QSize(16, 16))
-        self.copy_btn.setStyleSheet(_BTN_SECONDARY)
+        self.copy_btn.setStyleSheet(theme.btn_secondary())
         self.copy_btn.clicked.connect(self._copy_summary)
         self.copy_btn.setEnabled(False)
         bottom_row.addWidget(self.copy_btn)
 
         self.transcript_btn = QPushButton(t("open_transcript"))
-        self.transcript_btn.setStyleSheet(_BTN_SECONDARY)
+        self.transcript_btn.setStyleSheet(theme.btn_secondary())
         self.transcript_btn.clicked.connect(self._open_transcript_file)
         self.transcript_btn.setEnabled(False)
         bottom_row.addWidget(self.transcript_btn)
@@ -2395,7 +2274,7 @@ class MainWindow(QMainWindow):
         bottom_row.addStretch()
 
         self.update_ctx_btn = QPushButton(t("update_context"))
-        self.update_ctx_btn.setStyleSheet(_BTN_PRIMARY + """
+        self.update_ctx_btn.setStyleSheet(theme.btn_primary() + """
             QPushButton { padding: 6px 14px; font-size: 12px; border-radius: 6px; }
         """)
         self.update_ctx_btn.setMinimumHeight(30)
@@ -2584,7 +2463,7 @@ class MainWindow(QMainWindow):
         self._recording_start = time.monotonic()
         self.record_btn.setText(t("stop_recording", time="0:00"))
         self.record_btn.setIcon(self._stop_icon)
-        self.record_btn.setStyleSheet(_BTN_RECORDING)
+        self.record_btn.setStyleSheet(theme.btn_recording())
         self._rec_timer.start()
         self._set_status(t("status_recording"), "recording")
 
@@ -2765,7 +2644,7 @@ class MainWindow(QMainWindow):
         self._recording_start = None
         self.record_btn.setText(t("start_recording"))
         self.record_btn.setIcon(self._mic_icon)
-        self.record_btn.setStyleSheet(_BTN_PRIMARY)
+        self.record_btn.setStyleSheet(theme.btn_primary())
 
     # ── real-time transcription ───────────────────────────────────────
 
@@ -3021,13 +2900,7 @@ class MainWindow(QMainWindow):
     # ── helpers ──────────────────────────────────────────────────────
 
     def _set_status(self, msg: str, kind: str = "info"):
-        colors = {
-            "info":      (_C["text_secondary"], "transparent"),
-            "recording": ("#ffffff",            _C["danger"]),
-            "busy":      (_C["primary"],        f"rgba(74, 144, 217, 0.1)"),
-            "done":      (_C["success"],        f"rgba(45, 138, 78, 0.1)"),
-            "error":     ("#ffffff",            _C["danger"]),
-        }
+        colors = theme.status_colors()
         fg, bg = colors.get(kind, colors["info"])
         pad = "4px 10px" if bg != "transparent" else "4px 0px"
         radius = "10px" if bg != "transparent" else "0px"
@@ -3122,17 +2995,13 @@ def main():
     _logger = logging.getLogger("app")
     _logger.info("Summarizer starting")
 
+    # Apply theme before creating any widgets
+    cfg = config.load()
+    theme.apply(cfg.get("theme", "light"))
+
     app = QApplication(sys.argv)
     app.setApplicationName("Summarizer")
-
-    # Apply qt-material theme if configured
-    cfg_theme = config.load().get("theme", "")
-    if cfg_theme:
-        try:
-            from qt_material import apply_stylesheet
-            apply_stylesheet(app, theme=cfg_theme)
-        except Exception:
-            pass
+    app.setStyle("Fusion")
 
     icon_path = Path(__file__).parent / "icon.png"
     if icon_path.exists():
