@@ -2166,7 +2166,7 @@ class MainWindow(QMainWindow):
         top.addWidget(title)
         top.addStretch()
         settings_btn = QPushButton()
-        settings_btn.setIcon(_make_gear_icon(32, QColor(C["accent"])))
+        settings_btn.setIcon(_make_gear_icon(32, QColor(C["text_secondary"])))
         settings_btn.setIconSize(QSize(22, 22))
         settings_btn.setFixedSize(36, 36)
         settings_btn.setToolTip(t("settings_tooltip"))
