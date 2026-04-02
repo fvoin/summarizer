@@ -2142,6 +2142,7 @@ class MainWindow(QMainWindow):
         self._auto_stop_signal.connect(self._on_auto_stop)
         self._agent_poller: Optional[AgentPoller] = None
         self._agent_meeting: Optional[dict] = None
+        self._agent_armed_ids: set = set()  # persists across poller restarts
         self._build_ui()
         self._preload_model()
         self._setup_tray()
@@ -2440,6 +2441,7 @@ class MainWindow(QMainWindow):
         if cfg.get("agent_enabled") and cfg.get("agent_url") and cfg.get("agent_token"):
             if self._agent_poller is None:
                 self._agent_poller = AgentPoller(self)
+                self._agent_poller._armed_ids = self._agent_armed_ids  # share persistent set
                 self._agent_poller.meeting_armed.connect(self._on_agent_meeting)
                 self._agent_poller.error.connect(self._on_agent_error)
                 self._agent_poller.start()
@@ -2474,9 +2476,12 @@ class MainWindow(QMainWindow):
     def _agent_upload_transcript(self, transcript: str):
         """Upload transcript to backend after auto-record finishes."""
         if not self._agent_meeting:
+            _logger.info("Agent upload skipped: no agent meeting active")
             return
         meeting = self._agent_meeting
         self._agent_meeting = None
+        title = meeting.get("title", "Meeting")
+        _logger.info("Agent uploading transcript for '%s' (%d chars)", title, len(transcript))
         worker = PostCompleteWorker(transcript, meeting, self)
         worker.finished.connect(lambda data: self._on_agent_upload_done(data, meeting))
         worker.error.connect(lambda e: self._on_agent_upload_error(e, meeting))
@@ -3219,11 +3224,16 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Summarizer")
 
-    # Single-instance guard
-    from PyQt6.QtCore import QLockFile
-    lock_path = str(Path.home() / ".summarizer" / "summarizer.lock")
-    lock = QLockFile(lock_path)
-    if not lock.tryLock(100):
+    # Single-instance guard (fcntl.flock is released automatically on process death)
+    import fcntl
+    lock_path = Path.home() / ".summarizer" / "summarizer.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file.write(str(os.getpid()))
+        _lock_file.flush()
+    except OSError:
         _logger.warning("Another instance is already running, exiting.")
         sys.exit(0)
 

@@ -22,8 +22,8 @@ _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 POLL_INTERVAL = 5 * 60
 # No-show timeout: if no voice for this many seconds after start, abort
 NO_SHOW_TIMEOUT = 5 * 60
-# How early before start to arm (seconds)
-ARM_LEAD_TIME = 60
+# How early before start to arm (seconds) — must be > POLL_INTERVAL
+ARM_LEAD_TIME = 10 * 60
 
 
 class AgentPoller(QThread):
@@ -99,22 +99,30 @@ class AgentPoller(QThread):
             return
 
         now = datetime.now(timezone.utc)
+        _logger.info("Poll returned %d meeting(s), now=%s", len(data), now.isoformat())
         for meeting in data:
             mid = meeting.get("id") or meeting.get("calendarEventId") or meeting.get("title", "")
+            _logger.info("  Meeting '%s' (id=%s) start=%s", meeting.get("title", "?"), mid, meeting.get("start", "?"))
             if mid in self._armed_ids:
+                _logger.debug("  Already armed, skipping")
                 continue
             start_str = meeting.get("start") or meeting.get("startTime") or meeting.get("start_time", "")
             if not start_str:
+                _logger.warning("  No start time found, skipping")
                 continue
             try:
                 start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
             except (ValueError, TypeError):
+                _logger.warning("  Cannot parse start time: %s", start_str)
                 continue
             seconds_until = (start - now).total_seconds()
-            if seconds_until <= ARM_LEAD_TIME:
+            # Arm if meeting is about to start or already started (within last 10 min)
+            if seconds_until <= ARM_LEAD_TIME and seconds_until > -600:
                 self._armed_ids.add(mid)
-                _logger.info("Arming meeting %s (%s) in %ds", mid, meeting.get("title", ""), seconds_until)
+                _logger.info("  -> Arming! seconds_until=%.0f", seconds_until)
                 self.meeting_armed.emit(meeting)
+            else:
+                _logger.info("  -> Not arming, seconds_until=%.0f", seconds_until)
 
 
 def post_complete(transcript: str, meeting: dict) -> dict:
