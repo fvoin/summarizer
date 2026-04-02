@@ -276,10 +276,41 @@ def window_style() -> str:
             selection-background-color: {C['selection']};
         }}
         QComboBox {{
+            background-color: {C['surface']};
+            color: {C['text']};
             border: 1px solid {C['border']};
             border-radius: 6px;
-            padding: 4px 8px;
+            padding: 4px 28px 4px 8px;
             min-height: 20px;
+        }}
+        QComboBox::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: center right;
+            width: 24px;
+            border: none;
+            background: transparent;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            border: none;
+            width: 8px;
+            height: 6px;
+            background: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid {C['text_secondary']};
+        }}
+        QComboBox:on {{
+            border-color: {C['primary']};
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {C['surface']};
+            color: {C['text']};
+            border: 1px solid {C['border']};
+            selection-background-color: {C['primary']};
+            selection-color: {C['primary_text']};
+            outline: none;
+            padding: 2px;
         }}
         QSpinBox {{
             background-color: {C['surface']};

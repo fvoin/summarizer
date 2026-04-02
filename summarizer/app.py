@@ -1190,10 +1190,9 @@ class OllamaChatDialog(QDialog):
         hlay.addWidget(self._input, 1)
 
         self._send_btn = QPushButton(t("chat_send"))
-        self._send_btn.setFixedWidth(60)
-        self._send_btn.setStyleSheet(
-            f"background: {C['primary']}; color: {C['primary_text']}; border: none; border-radius: 4px; padding: 4px 8px;"
-        )
+        self._send_btn.setStyleSheet(theme.btn_primary() + """
+            QPushButton { padding: 6px 14px; font-size: 13px; border-radius: 6px; }
+        """)
         self._send_btn.clicked.connect(self._send)
         hlay.addWidget(self._send_btn)
         vlay.addLayout(hlay)
