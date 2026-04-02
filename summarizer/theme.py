@@ -7,10 +7,15 @@ themes is a single dict swap.
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Dict
 
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import QApplication
+
+# Temp dir for generated arrow images (persists for app lifetime)
+_ARROW_DIR = Path(tempfile.mkdtemp(prefix="summarizer_arrows_"))
 
 # ---------------------------------------------------------------------------
 # Palette definitions
@@ -138,6 +143,19 @@ def apply_palette(app: QApplication) -> None:
     p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(C["text_muted"]))
 
     app.setPalette(p)
+
+
+def _arrow_svg_path() -> str:
+    """Generate a small SVG arrow and return its file path for QSS image: url()."""
+    color = C["text_secondary"]
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6">'
+        f'<polygon points="0,0 10,0 5,6" fill="{color}"/>'
+        '</svg>'
+    )
+    path = _ARROW_DIR / "combo_arrow.svg"
+    path.write_text(svg)
+    return str(path).replace("\\", "/")
 
 
 # ---------------------------------------------------------------------------
@@ -291,14 +309,9 @@ def window_style() -> str:
             background: transparent;
         }}
         QComboBox::down-arrow {{
-            image: none;
-            border: none;
-            width: 8px;
+            image: url({_arrow_svg_path()});
+            width: 10px;
             height: 6px;
-            background: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid {C['text_secondary']};
         }}
         QComboBox:on {{
             border-color: {C['primary']};
@@ -306,11 +319,20 @@ def window_style() -> str:
         QComboBox QAbstractItemView {{
             background-color: {C['surface']};
             color: {C['text']};
-            border: 1px solid {C['border']};
+            border: none;
             selection-background-color: {C['primary']};
             selection-color: {C['primary_text']};
             outline: none;
-            padding: 2px;
+            padding: 4px;
+        }}
+        QComboBox QAbstractItemView::item {{
+            padding: 4px 8px;
+            border-radius: 4px;
+            min-height: 22px;
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background-color: {C['primary']};
+            color: {C['primary_text']};
         }}
         QSpinBox {{
             background-color: {C['surface']};
