@@ -100,10 +100,10 @@ class AgentPoller(QThread):
 
         now = datetime.now(timezone.utc)
         for meeting in data:
-            mid = meeting.get("id", "")
+            mid = meeting.get("id") or meeting.get("calendarEventId") or meeting.get("title", "")
             if mid in self._armed_ids:
                 continue
-            start_str = meeting.get("startTime") or meeting.get("start_time", "")
+            start_str = meeting.get("start") or meeting.get("startTime") or meeting.get("start_time", "")
             if not start_str:
                 continue
             try:
@@ -128,7 +128,7 @@ def post_complete(transcript: str, meeting: dict) -> dict:
 
     payload = json.dumps({
         "transcript": transcript,
-        "meetingId": meeting.get("id", ""),
+        "meetingId": meeting.get("id") or meeting.get("calendarEventId", ""),
         "title": meeting.get("title", ""),
         "participants": meeting.get("participants", []),
         "agenda": meeting.get("agenda", ""),
