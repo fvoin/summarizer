@@ -2463,9 +2463,11 @@ class MainWindow(QMainWindow):
         if self._recorder and self._recorder.is_recording():
             _logger.info("Already recording, skipping agent meeting %s", meeting.get("id"))
             return
-        self._agent_meeting = meeting
-        title = meeting.get("title", "Meeting")
-        _logger.info("Agent: auto-recording '%s'", title)
+        # Deep copy to ensure the dict survives cross-thread
+        import copy
+        self._agent_meeting = copy.deepcopy(meeting)
+        title = self._agent_meeting.get("title", "Meeting")
+        _logger.info("Agent: auto-recording '%s', _agent_meeting set to %s", title, id(self._agent_meeting))
         self._tray.showMessage("Summarizer", t("agent_notify_recording", title=title))
         # Start recording via the normal flow
         self._toggle_recording()
@@ -2821,6 +2823,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # If this was an agent-triggered recording, upload transcript
+        _logger.info("RT path: _agent_meeting=%s", "SET" if self._agent_meeting else "None")
+        if self._agent_meeting:
+            self._agent_meeting["_duration"] = duration or 0
+            self._agent_upload_transcript(transcript)
+
         if self._is_transcribe_only():
             self._finish_with_transcript(transcript)
         else:
@@ -3000,6 +3008,7 @@ class MainWindow(QMainWindow):
             pass
 
         # If this was an agent-triggered recording, upload transcript
+        _logger.info("Transcription done, _agent_meeting=%s", "SET" if self._agent_meeting else "None")
         if self._agent_meeting:
             self._agent_meeting["_duration"] = getattr(self, "_pending_duration", 0) or 0
             self._agent_upload_transcript(transcript)
