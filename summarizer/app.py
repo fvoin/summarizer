@@ -1707,6 +1707,29 @@ class SettingsDialog(QDialog):
         self.recordings_edit.setPlaceholderText(t("recordings_dir_placeholder"))
         general_form.addRow(t("recordings_dir_label"), self.recordings_edit)
 
+        # ── Theme selector ───────────────────────────────────────────────
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem(t("theme_none"), "")
+        try:
+            from qt_material import list_themes
+            for theme_file in sorted(list_themes()):
+                name = theme_file.replace(".xml", "").replace("_", " ").title()
+                self.theme_combo.addItem(name, theme_file)
+        except ImportError:
+            pass
+        saved_theme = self.cfg.get("theme", "")
+        idx = self.theme_combo.findData(saved_theme)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+        theme_layout = QVBoxLayout()
+        theme_layout.addWidget(self.theme_combo)
+        theme_hint = QLabel(t("theme_restart_hint"))
+        theme_hint.setStyleSheet("color: #888; font-size: 11px;")
+        theme_layout.addWidget(theme_hint)
+        theme_widget = QWidget()
+        theme_widget.setLayout(theme_layout)
+        general_form.addRow(t("theme_label"), theme_widget)
+
         logs_btn = QPushButton(t("open_log"))
         logs_btn.setToolTip(str(config.get_log_path()))
         logs_btn.clicked.connect(self._open_logs)
@@ -2119,6 +2142,7 @@ class SettingsDialog(QDialog):
         self.cfg["silence_timeout"] = self.silence_spin.value()
         self.cfg["input_device"] = self.device_combo.currentData()
         self.cfg["recordings_dir"] = self.recordings_edit.text().strip()
+        self.cfg["theme"] = self.theme_combo.currentData() or ""
         config.save(self.cfg)
         self.accept()
 
@@ -3100,6 +3124,15 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("Summarizer")
+
+    # Apply qt-material theme if configured
+    cfg_theme = config.load().get("theme", "")
+    if cfg_theme:
+        try:
+            from qt_material import apply_stylesheet
+            apply_stylesheet(app, theme=cfg_theme)
+        except Exception:
+            pass
 
     icon_path = Path(__file__).parent / "icon.png"
     if icon_path.exists():

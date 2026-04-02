@@ -196,6 +196,7 @@ _DEFAULTS = {
     "context_profiles": {},
     "input_device": None,
     "recordings_dir": "",
+    "theme": "",
 }
 
 WHISPER_MODELS = {
