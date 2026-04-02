@@ -201,12 +201,29 @@ def window_style() -> str:
     return f"""
         QMainWindow, QDialog {{
             background-color: {C['bg']};
-        }}
-        QWidget {{
             color: {C['text']};
         }}
         QLabel {{
             color: {C['text']};
+            background: transparent;
+        }}
+        QPushButton {{
+            background-color: transparent;
+            color: {C['primary']};
+            border: none;
+            border-radius: 6px;
+            padding: 7px 14px;
+            font-size: 13px;
+            font-weight: 500;
+        }}
+        QPushButton:hover {{
+            background-color: {C['hover_overlay']};
+        }}
+        QPushButton:pressed {{
+            background-color: {C['pressed_overlay']};
+        }}
+        QPushButton:disabled {{
+            color: {C['text_muted']};
         }}
         QTextEdit, QPlainTextEdit {{
             background-color: {C['surface']};
@@ -230,10 +247,22 @@ def window_style() -> str:
             border: 1px solid {C['border']};
             border-radius: 6px;
             padding: 4px 8px;
+            min-height: 20px;
         }}
         QComboBox::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: center right;
+            width: 24px;
             border: none;
-            width: 20px;
+        }}
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid {C['text_secondary']};
+            width: 0px;
+            height: 0px;
+            margin-right: 6px;
         }}
         QComboBox QAbstractItemView {{
             background-color: {C['surface']};
@@ -241,6 +270,10 @@ def window_style() -> str:
             border: 1px solid {C['border']};
             selection-background-color: {C['primary']};
             selection-color: {C['primary_text']};
+            outline: none;
+        }}
+        QComboBox:on {{
+            border-color: {C['primary']};
         }}
         QSpinBox {{
             background-color: {C['surface']};
@@ -252,6 +285,7 @@ def window_style() -> str:
         QCheckBox {{
             color: {C['text']};
             spacing: 6px;
+            background: transparent;
         }}
         QCheckBox::indicator {{
             width: 16px;
@@ -267,9 +301,11 @@ def window_style() -> str:
         QRadioButton {{
             color: {C['text']};
             spacing: 6px;
+            background: transparent;
         }}
         QGroupBox {{
             color: {C['text']};
+            background-color: {C['bg']};
             border: 1px solid {C['border']};
             border-radius: 8px;
             margin-top: 12px;
@@ -281,6 +317,13 @@ def window_style() -> str:
             left: 12px;
             padding: 0 4px;
             color: {C['text_secondary']};
+        }}
+        QScrollArea {{
+            background-color: {C['bg']};
+            border: none;
+        }}
+        QScrollArea > QWidget > QWidget {{
+            background-color: {C['bg']};
         }}
         QTabWidget::pane {{
             border: 1px solid {C['border']};
@@ -315,6 +358,9 @@ def window_style() -> str:
         QProgressBar::chunk {{
             background-color: {C['primary']};
             border-radius: 4px;
+        }}
+        QFormLayout {{
+            background: transparent;
         }}
         QScrollBar:vertical {{
             background: transparent;
