@@ -1783,6 +1783,9 @@ class SettingsDialog(QDialog):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             import subprocess
             subprocess.Popen(["open", str(dmg_path)])
+            parent = self.parent()
+            if parent and hasattr(parent, '_stop_agent'):
+                parent._stop_agent()
             QApplication.quit()
 
     def _on_update_download_error(self, msg: str):
