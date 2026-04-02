@@ -2376,10 +2376,42 @@ class MainWindow(QMainWindow):
         if config.load().get("menubar_enabled", False):
             self._tray.show()
 
+    @staticmethod
+    def _set_dock_visible(visible: bool):
+        try:
+            import AppKit
+            policy = (AppKit.NSApplicationActivationPolicyRegular if visible
+                      else AppKit.NSApplicationActivationPolicyAccessory)
+            AppKit.NSApp.setActivationPolicy_(policy)
+            if visible:
+                # Re-apply dock icon (macOS resets it on policy change)
+                icon_path = Path(__file__).parent / "icon.png"
+                if icon_path.exists():
+                    ns_image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+                    if ns_image:
+                        AppKit.NSApp.setApplicationIconImage_(ns_image)
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass
+
     def _tray_show(self):
+        self._set_dock_visible(True)
         self.show()
         self.raise_()
         self.activateWindow()
+        # Re-apply dock icon after a short delay (policy change needs to settle)
+        QTimer.singleShot(100, self._reapply_dock_icon)
+
+    def _reapply_dock_icon(self):
+        try:
+            import AppKit
+            icon_path = Path(__file__).parent / "icon.png"
+            if icon_path.exists():
+                ns_image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+                if ns_image:
+                    AppKit.NSApp.setApplicationIconImage_(ns_image)
+        except Exception:
+            pass
 
     def _tray_quit(self):
         self._stop_agent()
@@ -2396,6 +2428,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self._tray.isVisible():
             self.hide()
+            self._set_dock_visible(False)
             event.ignore()
         else:
             event.accept()

@@ -7,4 +7,5 @@ google-generativeai
 openai
 anthropic
 certifi
+pyobjc-framework-Cocoa
 pyinstaller
