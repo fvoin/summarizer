@@ -2382,6 +2382,7 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def _tray_quit(self):
+        self._stop_agent()
         self._tray.hide()
         QApplication.quit()
 

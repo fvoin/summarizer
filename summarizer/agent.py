@@ -88,8 +88,14 @@ class AgentPoller(QThread):
                 return
             raise
 
+        # Support both list and {meetings: [...]} / {data: [...]} responses
+        if isinstance(data, dict):
+            for key in ("meetings", "data", "items", "results"):
+                if key in data and isinstance(data[key], list):
+                    data = data[key]
+                    break
         if not isinstance(data, list):
-            _logger.warning("Unexpected response type: %s", type(data))
+            _logger.warning("Unexpected response format: %s", type(data))
             return
 
         now = datetime.now(timezone.utc)
