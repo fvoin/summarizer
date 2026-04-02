@@ -306,6 +306,14 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "chat_title":               {"en": "Chat with {name}",                    "ru": "Чат с {name}"},
     "chat_placeholder":         {"en": "Type a message…",                     "ru": "Введите сообщение…"},
     "chat_send":                {"en": "Send",                                "ru": "Отправить"},
+    "context_chat_title":       {"en": "Chat about meetings",                 "ru": "Чат о встречах"},
+    "context_chat_tooltip":     {"en": "Chat about this context",             "ru": "Чат об этом контексте"},
+    "context_chat_system":      {
+        "en": "You are a helpful assistant. Answer questions about the meeting based on the context below.\n\n{context}",
+        "ru": "Ты — полезный ассистент. Отвечай на вопросы о встрече на основе контекста ниже.\n\n{context}",
+    },
+    "btn_yes":                  {"en": "Yes",                                 "ru": "Да"},
+    "btn_no":                   {"en": "No",                                  "ru": "Нет"},
 
     # ── Menu bar / Tray ─────────────────────────────────────────────────
     "tray_show":                {"en": "Show Summarizer",                     "ru": "Показать Summarizer"},

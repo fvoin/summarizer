@@ -40,7 +40,42 @@ from .agent import AgentPoller, PostCompleteWorker
 _logger = logging.getLogger("app")
 
 
+def _ask_yes_no(parent, title: str, text: str) -> bool:
+    """Show a Yes/No question dialog with localized buttons. Returns True if Yes."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(title)
+    box.setText(text)
+    yes_btn = box.addButton(t("btn_yes"), QMessageBox.ButtonRole.YesRole)
+    box.addButton(t("btn_no"), QMessageBox.ButtonRole.NoRole)
+    box.exec()
+    return box.clickedButton() == yes_btn
+
+
 # ── Vector icon helpers ──────────────────────────────────────────────────
+
+def _make_chat_icon(size: int = 32, color: QColor = QColor("#4A90D9")) -> QIcon:
+    """Draw a simple chat bubble icon."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(color, size * 0.07, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    # Rounded rectangle bubble
+    m = size * 0.15
+    p.drawRoundedRect(int(m), int(m), int(size - m * 2), int(size * 0.6), size * 0.12, size * 0.12)
+    # Small triangle tail
+    tail_x = size * 0.3
+    tail_y = m + size * 0.6
+    path = QPainterPath()
+    path.moveTo(tail_x, tail_y - 1)
+    path.lineTo(tail_x - size * 0.05, tail_y + size * 0.15)
+    path.lineTo(tail_x + size * 0.12, tail_y - 1)
+    p.drawPath(path)
+    p.end()
+    return QIcon(pm)
+
 
 def _make_rec_dot_icon(size: int = 64, color: QColor = QColor("#D94A4A")) -> QIcon:
     """Draw a filled red circle (record indicator)."""
@@ -1187,15 +1222,40 @@ class OllamaChatDialog(QDialog):
         hlay.addWidget(self._send_btn)
         vlay.addLayout(hlay)
 
+        # Thinking indicator
+        self._thinking_timer = QTimer(self)
+        self._thinking_dots = 0
+        self._thinking_anchor = 0
+        self._thinking_timer.timeout.connect(self._update_thinking)
+
+    def _update_thinking(self):
+        self._thinking_dots = (self._thinking_dots % 3) + 1
+        dots = "." * self._thinking_dots
+        cursor = self._chat_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        pos = cursor.position()
+        cursor.setPosition(self._thinking_anchor)
+        cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+        cursor.insertText(dots)
+        self._chat_view.setTextCursor(cursor)
+        sb = self._chat_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
     def _send(self):
         text = self._input.text().strip()
         if not text or self._worker is not None:
             return
         self._input.clear()
         self._messages.append({"role": "user", "content": text})
-        self._chat_view.append(f"<p style='color:{C['primary']};'><b>You:</b> {text}</p>")
-        self._chat_view.append(f"<p style='color:{C['chat_assistant']};'><b>{self._model}:</b> ")
+        self._chat_view.append(f"<b style='color:{C['primary']};'>You:</b> {text}")
+        self._chat_view.append(f"<b style='color:{C['chat_assistant']};'>{self._model}:</b> ")
+        # Mark anchor for thinking dots
+        cursor = self._chat_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._thinking_anchor = cursor.position()
         self._set_busy(True)
+        self._thinking_dots = 0
+        self._thinking_timer.start(400)
 
         self._worker = _OllamaChatWorker(self._model, list(self._messages))
         self._assistant_buf = ""
@@ -1205,6 +1265,14 @@ class OllamaChatDialog(QDialog):
         self._worker.start()
 
     def _on_chunk(self, text: str):
+        if self._thinking_timer.isActive():
+            self._thinking_timer.stop()
+            cursor = self._chat_view.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            pos = cursor.position()
+            cursor.setPosition(self._thinking_anchor)
+            cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
         self._assistant_buf += text
         cursor = self._chat_view.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
@@ -1213,12 +1281,13 @@ class OllamaChatDialog(QDialog):
         self._chat_view.ensureCursorVisible()
 
     def _on_error(self, msg: str):
-        self._chat_view.append(f"<p style='color:{C['error']};'>Error: {msg}</p>")
+        self._thinking_timer.stop()
+        self._chat_view.append(f"<span style='color:{C['error']};'>Error: {msg}</span>")
 
     def _on_done(self):
+        self._thinking_timer.stop()
         if self._assistant_buf:
             self._messages.append({"role": "assistant", "content": self._assistant_buf})
-        self._chat_view.append("</p>")
         self._worker = None
         self._set_busy(False)
 
@@ -1229,6 +1298,210 @@ class OllamaChatDialog(QDialog):
             self._input.setFocus()
 
     def closeEvent(self, event):
+        self._thinking_timer.stop()
+        if self._worker and self._worker.isRunning():
+            self._worker.terminate()
+            self._worker.wait(2000)
+        super().closeEvent(event)
+
+
+class _LLMChatWorker(QThread):
+    """Send messages to any configured LLM (cloud or local) in a background thread."""
+    reply_chunk = pyqtSignal(str)
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, system: str, messages: list):
+        super().__init__()
+        self._system = system
+        self._messages = messages
+
+    def run(self):
+        try:
+            cfg = config.load()
+            config.apply_env(cfg)
+            model = cfg.get("model", "gemini-2.5-pro")
+            m = model.lower()
+
+            msgs = [{"role": "system", "content": self._system}] + self._messages
+
+            if m in config.LOCAL_LLM_MODELS or "ollama:" in m:
+                self._call_openai_compat("http://localhost:11434/v1", "ollama", model, msgs)
+            elif "gemini" in m:
+                self._call_gemini(model, msgs)
+            elif "claude" in m:
+                self._call_anthropic(model, msgs)
+            else:
+                self._call_openai_compat(None, None, model, msgs)
+        except Exception as e:
+            self.error.emit(str(e))
+        finally:
+            self.finished.emit()
+
+    def _call_openai_compat(self, base_url, api_key, model, msgs):
+        from openai import OpenAI
+        kwargs = {}
+        if base_url:
+            kwargs["base_url"] = base_url
+        if api_key:
+            kwargs["api_key"] = api_key
+        if "ollama" in (api_key or ""):
+            ollama = config.find_ollama()
+            if ollama:
+                config.ensure_ollama_server(ollama)
+        client = OpenAI(**kwargs)
+        resp = client.chat.completions.create(model=model, messages=msgs)
+        self.reply_chunk.emit(resp.choices[0].message.content.strip())
+
+    def _call_gemini(self, model, msgs):
+        import google.generativeai as genai
+        import os
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY not set")
+        genai.configure(api_key=api_key, transport="rest")
+        system = msgs[0]["content"] if msgs and msgs[0]["role"] == "system" else ""
+        user_parts = []
+        for m in msgs[1:]:
+            user_parts.append(f"{m['role'].title()}: {m['content']}")
+        gmodel = genai.GenerativeModel(model, system_instruction=system)
+        response = gmodel.generate_content("\n\n".join(user_parts))
+        self.reply_chunk.emit(response.text)
+
+    def _call_anthropic(self, model, msgs):
+        import anthropic
+        system = msgs[0]["content"] if msgs and msgs[0]["role"] == "system" else ""
+        api_msgs = [m for m in msgs if m["role"] != "system"]
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model=model, max_tokens=4096, system=system, messages=api_msgs,
+        )
+        self.reply_chunk.emit(response.content[0].text)
+
+
+class ContextChatDialog(QDialog):
+    """Chat dialog for asking questions about meeting context."""
+
+    def __init__(self, context_text: str, summary_text: str = "", context_name: str = "", parent=None):
+        super().__init__(parent)
+        title = t("context_chat_title")
+        if context_name:
+            title = f"{title} — {context_name}"
+        self.setWindowTitle(title)
+        self.resize(560, 480)
+        self._system = t("context_chat_system", context=context_text)
+        if summary_text:
+            self._system += f"\n\nLast summary:\n{summary_text}"
+        self._messages: list[dict] = []
+        self._worker: Optional[_LLMChatWorker] = None
+
+        vlay = QVBoxLayout(self)
+
+        self._chat_view = QTextEdit()
+        self._chat_view.setReadOnly(True)
+        self._chat_view.setPlaceholderText(t("chat_placeholder"))
+        vlay.addWidget(self._chat_view, 1)
+
+        hlay = QHBoxLayout()
+        self._input = QLineEdit()
+        self._input.setPlaceholderText(t("chat_placeholder"))
+        self._input.returnPressed.connect(self._send)
+        hlay.addWidget(self._input, 1)
+
+        self._send_btn = QPushButton(t("chat_send"))
+        self._send_btn.setStyleSheet(theme.btn_secondary())
+        self._send_btn.clicked.connect(self._send)
+        hlay.addWidget(self._send_btn)
+        vlay.addLayout(hlay)
+
+        # Thinking indicator
+        self._thinking_timer = QTimer(self)
+        self._thinking_dots = 0
+        self._thinking_anchor = 0
+        self._thinking_timer.timeout.connect(self._update_thinking)
+
+    def _append_text(self, html: str):
+        """Append HTML without extra <p> wrapper."""
+        cursor = self._chat_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.insertHtml(html)
+        self._chat_view.setTextCursor(cursor)
+        self._chat_view.ensureCursorVisible()
+
+    def _update_thinking(self):
+        self._thinking_dots = (self._thinking_dots % 3) + 1
+        dots = "." * self._thinking_dots
+        cursor = self._chat_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        pos = cursor.position()
+        cursor.setPosition(self._thinking_anchor)
+        cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+        cursor.insertText(dots)
+        self._chat_view.setTextCursor(cursor)
+        sb = self._chat_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _send(self):
+        text = self._input.text().strip()
+        if not text or self._worker is not None:
+            return
+        self._input.clear()
+        self._messages.append({"role": "user", "content": text})
+        self._chat_view.append(f"<b style='color:{C['primary']};'>You:</b> {text}")
+        self._chat_view.append(f"<b style='color:{C['chat_assistant']};'>AI:</b> ")
+        # Mark position for thinking dots
+        cursor = self._chat_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self._thinking_anchor = cursor.position()
+        self._set_busy(True)
+        self._thinking_dots = 0
+        self._thinking_timer.start(400)
+
+        self._worker = _LLMChatWorker(self._system, list(self._messages))
+        self._assistant_buf = ""
+        self._worker.reply_chunk.connect(self._on_chunk)
+        self._worker.error.connect(self._on_error)
+        self._worker.finished.connect(self._on_done)
+        self._worker.start()
+
+    def _on_chunk(self, text: str):
+        # Stop thinking animation and clear dots on first chunk
+        if self._thinking_timer.isActive():
+            self._thinking_timer.stop()
+            cursor = self._chat_view.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            pos = cursor.position()
+            cursor.setPosition(self._thinking_anchor)
+            cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        self._assistant_buf += text
+        cursor = self._chat_view.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.insertText(text)
+        self._chat_view.setTextCursor(cursor)
+        self._chat_view.ensureCursorVisible()
+
+    def _on_error(self, msg: str):
+        self._thinking_timer.stop()
+        self._append_text(f"<br><span style='color:{C['error']};'>Error: {msg}</span><br>")
+
+    def _on_done(self):
+        self._thinking_timer.stop()
+        if self._assistant_buf:
+            self._messages.append({"role": "assistant", "content": self._assistant_buf})
+        self._append_text("<br>")
+        self._worker = None
+        self._set_busy(False)
+
+    def _set_busy(self, busy: bool):
+        self._send_btn.setEnabled(not busy)
+        self._input.setEnabled(not busy)
+        if not busy:
+            self._send_btn.setText(t("chat_send"))
+            self._input.setFocus()
+
+    def closeEvent(self, event):
+        self._thinking_timer.stop()
         if self._worker and self._worker.isRunning():
             self._worker.terminate()
             self._worker.wait(2000)
@@ -1504,7 +1777,7 @@ class SettingsDialog(QDialog):
         models_vlay.addWidget(whisper_group)
         models_vlay.addStretch()
         models_scroll.setWidget(models_inner)
-        tabs.addTab(models_scroll, t("tab_models"))
+        # Models tab added below after General tab
 
         # ── TAB: Instructions ─────────────────────────────────────────────
         instr_tab = QWidget()
@@ -1536,7 +1809,7 @@ class SettingsDialog(QDialog):
         self.instructions_edit.setPlaceholderText(t("instructions_placeholder"))
         instr_outer.addWidget(self.instructions_edit, 1)
 
-        tabs.addTab(instr_tab, t("tab_instructions"))
+        # Instructions tab added below after General tab
 
         # ── TAB: General ──────────────────────────────────────────────────
         general_tab = QWidget()
@@ -1604,26 +1877,28 @@ class SettingsDialog(QDialog):
         theme_widget.setLayout(theme_layout)
         general_form.addRow(t("theme_label"), theme_widget)
 
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
         logs_btn = QPushButton(t("open_log"))
         logs_btn.setToolTip(str(config.get_log_path()))
         logs_btn.clicked.connect(self._open_logs)
-        general_form.addRow(t("diagnostics_label"), logs_btn)
-
-        update_row = QHBoxLayout()
-        version_label = QLabel(f"v{config.APP_VERSION}")
-        version_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
-        update_row.addWidget(version_label)
+        bottom_row.addWidget(logs_btn)
         self._update_btn = QPushButton(t("check_updates"))
         self._update_btn.clicked.connect(self._check_for_updates)
-        update_row.addWidget(self._update_btn)
+        bottom_row.addWidget(self._update_btn)
         self._update_progress = QProgressBar()
         self._update_progress.setMaximumHeight(18)
         self._update_progress.setVisible(False)
-        update_row.addWidget(self._update_progress)
-        update_row.addStretch()
-        general_form.addRow(t("version_label"), update_row)
+        bottom_row.addWidget(self._update_progress)
+        bottom_row.addStretch()
+        version_label = QLabel(f"v{config.APP_VERSION}")
+        version_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
+        bottom_row.addWidget(version_label)
+        general_form.addRow("", bottom_row)
 
         tabs.addTab(general_tab, t("tab_general"))
+        tabs.addTab(models_scroll, t("tab_models"))
+        tabs.addTab(instr_tab, t("tab_instructions"))
 
         # ── TAB: Agent ────────────────────────────────────────────────────
         agent_tab = QWidget()
@@ -1708,9 +1983,7 @@ class SettingsDialog(QDialog):
         notes = info.get("notes", "")
         preview = notes[:300] + "…" if len(notes) > 300 else notes
         msg = t("update_available_msg", tag=tag, notes=preview)
-        reply = QMessageBox.question(self, t("update_available_title"), msg,
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
+        if _ask_yes_no(self, t("update_available_title"), msg):
             self._start_download(info["dmg_url"])
 
     def _on_no_update(self):
@@ -1846,12 +2119,7 @@ class SettingsDialog(QDialog):
         name = self.profile_combo.currentData()
         if not name or name == config.DEFAULT_PROFILE_NAME:
             return
-        answer = QMessageBox.question(
-            self, t("delete_profile_title"),
-            t("delete_profile_confirm", name=name),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not _ask_yes_no(self, t("delete_profile_title"), t("delete_profile_confirm", name=name)):
             return
         config.delete_profile(name)
         new_cfg = config.load()
@@ -1917,12 +2185,7 @@ class SettingsDialog(QDialog):
                 t("bundled_model_msg", name=model_name),
             )
             return
-        answer = QMessageBox.question(
-            self, t("delete_whisper_title"),
-            t("delete_whisper_confirm", name=model_name),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not _ask_yes_no(self, t("delete_whisper_title"), t("delete_whisper_confirm", name=model_name)):
             return
         try:
             config.delete_whisper_model(model_name)
@@ -2017,12 +2280,7 @@ class SettingsDialog(QDialog):
     def _delete_local_llm(self, model_key: str):
         info = config.LOCAL_LLM_MODELS.get(model_key, {})
         name = info.get("display", model_key)
-        answer = QMessageBox.question(
-            self, t("delete_local_title"),
-            t("delete_local_confirm", name=name),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not _ask_yes_no(self, t("delete_local_title"), t("delete_local_confirm", name=name)):
             return
         config.delete_local_llm(model_key)
         row = self._local_llm_rows.get(model_key)
@@ -2039,12 +2297,7 @@ class SettingsDialog(QDialog):
     def _save(self):
         selected_wm = self._get_selected_whisper_model()
         if not config.is_model_downloaded(selected_wm):
-            answer = QMessageBox.question(
-                self, t("model_not_downloaded_title"),
-                t("model_not_downloaded_msg", name=selected_wm),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not _ask_yes_no(self, t("model_not_downloaded_title"), t("model_not_downloaded_msg", name=selected_wm)):
                 return
         active_profile = self.profile_combo.currentData() or config.DEFAULT_PROFILE_NAME
         instructions_text = self.instructions_edit.toPlainText().strip()
@@ -2220,6 +2473,16 @@ class MainWindow(QMainWindow):
         self._del_ctx_btn.clicked.connect(self._delete_context)
         self._del_ctx_btn.setVisible(False)
         ctx_row.addWidget(self._del_ctx_btn)
+
+        self._chat_ctx_btn = QPushButton()
+        self._chat_ctx_btn.setFixedSize(28, 28)
+        self._chat_ctx_btn.setIcon(_make_chat_icon(32, QColor(C["primary"])))
+        self._chat_ctx_btn.setIconSize(QSize(18, 18))
+        self._chat_ctx_btn.setToolTip(t("context_chat_tooltip"))
+        self._chat_ctx_btn.setStyleSheet(theme.ghost_btn())
+        self._chat_ctx_btn.clicked.connect(self._open_context_chat)
+        self._chat_ctx_btn.setVisible(False)
+        ctx_row.addWidget(self._chat_ctx_btn)
         ctx_row.addStretch()
         self.context_combo.currentIndexChanged.connect(self._on_context_combo_changed)
         root.addLayout(ctx_row)
@@ -2468,17 +2731,15 @@ class MainWindow(QMainWindow):
         self._start_agent_if_enabled()
 
     def _on_agent_meeting(self, meeting: dict):
-        """A meeting is ready to record — start recording automatically."""
+        """A meeting is ready to record — start recording immediately."""
         if self._recorder and self._recorder.is_recording():
             _logger.info("Already recording, skipping agent meeting %s", meeting.get("id"))
             return
-        # Deep copy to ensure the dict survives cross-thread
         import copy
         self._agent_meeting = copy.deepcopy(meeting)
         title = self._agent_meeting.get("title", "Meeting")
-        _logger.info("Agent: auto-recording '%s', _agent_meeting set to %s", title, id(self._agent_meeting))
+        _logger.info("Agent: auto-recording '%s'", title)
         self._tray.showMessage("Summarizer", t("agent_notify_recording", title=title))
-        # Start recording via the normal flow
         self._toggle_recording()
 
     def _on_agent_error(self, msg: str):
@@ -2536,6 +2797,7 @@ class MainWindow(QMainWindow):
         has_selection = bool(name)
         self._edit_ctx_btn.setVisible(has_selection)
         self._del_ctx_btn.setVisible(has_selection)
+        self._chat_ctx_btn.setVisible(has_selection)
         self._gen_lbl.setVisible(has_selection)
         self.general_ctx.setVisible(has_selection)
 
@@ -2616,12 +2878,7 @@ class MainWindow(QMainWindow):
         name = self.context_combo.currentData()
         if not name:
             return
-        answer = QMessageBox.question(
-            self, t("delete_context_title"),
-            t("delete_context_confirm", name=name),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not _ask_yes_no(self, t("delete_context_title"), t("delete_context_confirm", name=name)):
             return
         self._prev_context_name = None
         rdir = config.get_recordings_dir()
@@ -2639,6 +2896,30 @@ class MainWindow(QMainWindow):
         ctx_file = rdir / f"{name}_context.txt"
         ctx_file.touch(exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(ctx_file)))
+
+    def _open_context_chat(self):
+        """Open a chat dialog with the current context."""
+        name = self.context_combo.currentData()
+        if not name:
+            return
+        # Read the entire context file (general + history)
+        rdir = config.get_recordings_dir()
+        ctx_file = rdir / f"{name}_context.txt"
+        context_text = ""
+        if ctx_file.exists():
+            try:
+                context_text = ctx_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+        # Add current meeting context from UI
+        meeting = self.meeting_ctx.toPlainText().strip()
+        if meeting:
+            context_text += f"\n\nCurrent meeting context:\n{meeting}"
+        if not context_text:
+            context_text = "No context available."
+        summary = self.result_text.toPlainText().strip()
+        dlg = ContextChatDialog(context_text, summary_text=summary, context_name=name, parent=self)
+        dlg.exec()
 
     def _get_context(self) -> tuple[Optional[str], str, str, str]:
         """Return (context_name, general_text, meeting_text, profile_name)."""
