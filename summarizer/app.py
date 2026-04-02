@@ -3002,6 +3002,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Summarizer")
     app.setStyle("Fusion")
+    theme.apply_palette(app)
 
     icon_path = Path(__file__).parent / "icon.png"
     if icon_path.exists():

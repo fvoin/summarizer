@@ -6,7 +6,7 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.15.2"
+APP_VERSION = "1.15.3"
 
 _CONFIG_DIR = Path.home() / ".summarizer"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"

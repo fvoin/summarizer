@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Dict
 
+from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtWidgets import QApplication
+
 # ---------------------------------------------------------------------------
 # Palette definitions
 # ---------------------------------------------------------------------------
@@ -104,6 +107,37 @@ def apply(name: str) -> None:
     """Switch the active palette to *name* (e.g. ``"dark"``)."""
     C.clear()
     C.update(_THEMES.get(name, _LIGHT))
+
+
+def apply_palette(app: QApplication) -> None:
+    """Set QApplication palette from the active theme.
+
+    This lets Fusion paint native-looking combo boxes, radio buttons,
+    and other complex widgets without QSS fighting the renderer.
+    """
+    p = QPalette()
+    p.setColor(QPalette.ColorRole.Window, QColor(C["bg"]))
+    p.setColor(QPalette.ColorRole.WindowText, QColor(C["text"]))
+    p.setColor(QPalette.ColorRole.Base, QColor(C["surface"]))
+    p.setColor(QPalette.ColorRole.AlternateBase, QColor(C["surface_alt"]))
+    p.setColor(QPalette.ColorRole.Text, QColor(C["text"]))
+    p.setColor(QPalette.ColorRole.Button, QColor(C["surface"]))
+    p.setColor(QPalette.ColorRole.ButtonText, QColor(C["text"]))
+    p.setColor(QPalette.ColorRole.Highlight, QColor(C["primary"]))
+    p.setColor(QPalette.ColorRole.HighlightedText, QColor(C["primary_text"]))
+    p.setColor(QPalette.ColorRole.ToolTipBase, QColor(C["surface"]))
+    p.setColor(QPalette.ColorRole.ToolTipText, QColor(C["text"]))
+    p.setColor(QPalette.ColorRole.PlaceholderText, QColor(C["text_muted"]))
+    p.setColor(QPalette.ColorRole.Mid, QColor(C["border"]))
+    p.setColor(QPalette.ColorRole.Dark, QColor(C["border"]))
+    p.setColor(QPalette.ColorRole.Light, QColor(C["surface_alt"]))
+
+    # Disabled state
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(C["text_muted"]))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(C["text_muted"]))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(C["text_muted"]))
+
+    app.setPalette(p)
 
 
 # ---------------------------------------------------------------------------
@@ -242,38 +276,10 @@ def window_style() -> str:
             selection-background-color: {C['selection']};
         }}
         QComboBox {{
-            background-color: {C['surface']};
-            color: {C['text']};
             border: 1px solid {C['border']};
             border-radius: 6px;
             padding: 4px 8px;
             min-height: 20px;
-        }}
-        QComboBox::drop-down {{
-            subcontrol-origin: padding;
-            subcontrol-position: center right;
-            width: 24px;
-            border: none;
-        }}
-        QComboBox::down-arrow {{
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid {C['text_secondary']};
-            width: 0px;
-            height: 0px;
-            margin-right: 6px;
-        }}
-        QComboBox QAbstractItemView {{
-            background-color: {C['surface']};
-            color: {C['text']};
-            border: 1px solid {C['border']};
-            selection-background-color: {C['primary']};
-            selection-color: {C['primary_text']};
-            outline: none;
-        }}
-        QComboBox:on {{
-            border-color: {C['primary']};
         }}
         QSpinBox {{
             background-color: {C['surface']};
@@ -302,6 +308,20 @@ def window_style() -> str:
             color: {C['text']};
             spacing: 6px;
             background: transparent;
+        }}
+        QRadioButton::indicator {{
+            width: 16px;
+            height: 16px;
+            border: 2px solid {C['border']};
+            border-radius: 10px;
+            background-color: {C['surface']};
+        }}
+        QRadioButton::indicator:hover {{
+            border-color: {C['primary']};
+        }}
+        QRadioButton::indicator:checked {{
+            border-color: {C['primary']};
+            background-color: {C['primary']};
         }}
         QGroupBox {{
             color: {C['text']};
