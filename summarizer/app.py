@@ -2181,14 +2181,17 @@ class MainWindow(QMainWindow):
         root.addSpacing(4)
 
         # ── context section ──
+        _lbl_w = 90   # fixed label width for alignment
+        _combo_w = 220  # fixed combo width for both rows
         ctx_row = QHBoxLayout()
         named_lbl = QLabel(t("context_label"))
+        named_lbl.setFixedWidth(_lbl_w)
         named_lbl.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
         ctx_row.addWidget(named_lbl)
         self.context_combo = theme.FlatComboBox()
-        self.context_combo.setMinimumWidth(180)
+        self.context_combo.setFixedWidth(_combo_w)
         self._refresh_contexts()
-        ctx_row.addWidget(self.context_combo, 1)
+        ctx_row.addWidget(self.context_combo)
         add_ctx_btn = QPushButton("+")
         add_ctx_btn.setFixedSize(28, 28)
         add_ctx_btn.setToolTip(t("context_add_tooltip"))
@@ -2217,8 +2220,25 @@ class MainWindow(QMainWindow):
         self._del_ctx_btn.clicked.connect(self._delete_context)
         self._del_ctx_btn.setVisible(False)
         ctx_row.addWidget(self._del_ctx_btn)
+        ctx_row.addStretch()
         self.context_combo.currentIndexChanged.connect(self._on_context_combo_changed)
         root.addLayout(ctx_row)
+
+        # ── instructions profile row ──
+        profile_row = QHBoxLayout()
+        profile_row.setSpacing(6)
+        profile_lbl = QLabel(t("instructions_label"))
+        profile_lbl.setFixedWidth(_lbl_w)
+        profile_lbl.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
+        profile_row.addWidget(profile_lbl)
+        self.profile_select = theme.FlatComboBox()
+        self.profile_select.setFixedWidth(_combo_w)
+        self._reload_main_profile_combo()
+        self.profile_select.currentIndexChanged.connect(self._on_main_profile_changed)
+        profile_row.addWidget(self.profile_select)
+        profile_row.addStretch()
+        root.addLayout(profile_row)
+        root.addSpacing(12)
 
         self._gen_lbl = QLabel(t("general_context_label"))
         self._gen_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin: 0;")
@@ -2247,20 +2267,6 @@ class MainWindow(QMainWindow):
         self.meeting_ctx.setSizePolicy(self.meeting_ctx.sizePolicy().horizontalPolicy(),
                                         QSizePolicy.Policy.Preferred)
         root.addWidget(self.meeting_ctx)
-
-        # ── instructions profile row ──
-        profile_row = QHBoxLayout()
-        profile_row.setSpacing(6)
-        profile_lbl = QLabel(t("instructions_label"))
-        profile_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']};")
-        profile_row.addWidget(profile_lbl)
-        self.profile_select = theme.FlatComboBox()
-        self.profile_select.setMinimumWidth(140)
-        self._reload_main_profile_combo()
-        self.profile_select.currentIndexChanged.connect(self._on_main_profile_changed)
-        profile_row.addWidget(self.profile_select)
-        profile_row.addStretch()
-        root.addLayout(profile_row)
 
         # ── record button ──
         root.addSpacing(6)
