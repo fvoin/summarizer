@@ -3168,6 +3168,8 @@ class MainWindow(QMainWindow):
             self._set_dock_visible(False)
             event.ignore()
         else:
+            self._stop_agent()
+            self._tray.hide()
             event.accept()
 
     # ── agent integration ────────────────────────────────────────────
