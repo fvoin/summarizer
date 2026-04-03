@@ -394,13 +394,26 @@ def page_main_window(c):
     c.setFillColor(PRIMARY)
     c.setFont(FB, 11)
     c.drawString(ox + 206, ct - 2, "+")
-    c.setFillColor(HexColor("#b08800"))
-    c.setFont(F, 12)
-    c.drawString(ox + 222, ct - 2, "\u270f")
-    # Chat bubble icon
-    c.setFillColor(PRIMARY)
-    c.setFont(F, 10)
-    c.drawString(ox + 238, ct - 2, "\U0001f4ac")
+    # Edit pencil icon (drawn)
+    c.saveState()
+    c.setStrokeColor(HexColor("#b08800"))
+    c.setLineWidth(1.2)
+    px, py = ox + 226, ct + 1
+    c.line(px, py - 6, px + 5, py + 1)
+    c.line(px - 1, py - 7, px, py - 6)
+    c.restoreState()
+    # Chat bubble icon (drawn)
+    c.saveState()
+    c.setStrokeColor(PRIMARY)
+    c.setFillColor(transparent)
+    c.setLineWidth(0.8)
+    bx, by = ox + 239, ct - 1
+    p = c.beginPath()
+    p.roundRect(bx, by, 8, 6, 1.5)
+    c.drawPath(p, fill=0, stroke=1)
+    c.line(bx + 2, by, bx + 1, by - 2)
+    c.restoreState()
+    # Delete X
     c.setFillColor(DANGER)
     c.setFont(FB, 11)
     c.drawString(ox + 254, ct - 2, "\u00d7")
@@ -949,12 +962,12 @@ def page_context(c):
              "All data is stored in a local SQLite database."),
         (hs, "Creating a Series"),
         (bs, "Click <b>+</b> next to the Meeting series dropdown and enter a name. "
-             "Use <b>\u270f</b> to open the series editor, "
-             "<b>\U0001f4ac</b> to chat about the series, "
+             "Use <b>edit (pencil)</b> to open the series editor, "
+             "<b>chat (bubble)</b> to chat about the series, "
              "and <b>\u00d7</b> to delete it."),
         (hs, "Persistent Context"),
         (bs, "Each series has a persistent context — participants, goals, key terms. "
-             "Edit it via the <b>\u270f</b> series editor. "
+             "Edit it via the <b>edit (pencil)</b> series editor. "
              "This is always included in the LLM prompt for accurate summaries."),
         (hs, "This Meeting Context"),
         (bs, "Per-session details — today's agenda, attendees, specific topics. "
@@ -966,7 +979,7 @@ def page_context(c):
              "is loaded into the prompt — persistent context and current meeting context "
              "are always included in full, remaining budget is filled with recent summaries."),
         (hs, "Series Chat"),
-        (bs, "Click <b>\U0001f4ac</b> to chat with an AI about the series. "
+        (bs, "Click <b>chat (bubble)</b> to chat with an AI about the series. "
              "The model sees the persistent context and all recent meeting summaries. "
              "Ask questions like 'what did we decide about X?' or 'what are the open action items?'"),
     ]
@@ -1072,11 +1085,11 @@ def page_history(c):
              "It shows a searchable, scrollable list of all past meetings with their date, "
              "series, transcript, and summary. All data is stored in a local SQLite database."),
         (hs, "Meeting Series Editor"),
-        (bs, "Click the <b>edit button</b> (\u270f) next to the series dropdown to open the "
+        (bs, "Click the <b>edit button</b> (pencil) next to the series dropdown to open the "
              "series editor. Here you can rename series, update general context, review "
              "accumulated history, and delete series you no longer need."),
         (hs, "Series Chat"),
-        (bs, "Click the <b>chat icon</b> (\U0001f4ac) next to the series dropdown to open a "
+        (bs, "Click the <b>chat icon</b> (chat bubble) next to the series dropdown to open a "
              "chat window scoped to that meeting series. Ask questions about past meetings, "
              "action items, decisions, or trends \u2014 the LLM has access to the full series "
              "history stored in the database."),
@@ -1107,9 +1120,9 @@ def page_faq(c):
     c.setFillColor(PRIMARY)
     c.drawString(40, H - 60, "FAQ & Tips")
 
-    bs = ParagraphStyle("b", fontName=F, fontSize=10, leading=14.5, textColor=TEXT, spaceAfter=6)
-    qs = ParagraphStyle("q", fontName=FB, fontSize=11, leading=15, textColor=TEXT,
-                        spaceBefore=12, spaceAfter=3)
+    bs = ParagraphStyle("b", fontName=F, fontSize=10.5, leading=15, textColor=TEXT, spaceAfter=6)
+    qs = ParagraphStyle("q", fontName=FB, fontSize=12, leading=16, textColor=PRIMARY,
+                        spaceBefore=14, spaceAfter=4)
 
     qa = [
         ("Where do I get an API key?",
@@ -1124,18 +1137,18 @@ def page_faq(c):
          "<b>medium</b> (1.5 GB) — best balance of speed and accuracy. "
          "<b>large-v3</b> (3.1 GB) — maximum accuracy, but slower."),
         ("Where is data stored?",
+         "Database: ~/.summarizer/summarizer.db (meetings, contexts, transcripts). "
          "Config: ~/.summarizer/config.json. "
-         "Contexts &amp; transcripts: ~/.summarizer/recordings/. "
          "Whisper models: ~/.summarizer/models/. "
-         "App log: ~/.summarizer/summarizer.log (open via Settings → General → Open Log File)."),
+         "App log: ~/.summarizer/summarizer.log."),
         ("Is it safe?",
          "Audio is always processed <b>locally</b> by Whisper — it never leaves your Mac. "
          "With cloud models, only the text transcript is sent to the LLM. "
-         "With <b>local models (Ollama)</b>, everything stays on your Mac — fully offline, "
-         "no data ever leaves your machine."),
-        ("How do I test a local model before using it?",
-         "In Settings → Models, once a local model is downloaded, a <b>Test</b> button appears. "
-         "Click it to open a chat window and send messages directly to the model."),
+         "With <b>local models (Ollama)</b>, everything stays on your Mac — fully offline."),
+        ("How do I use the menu bar mode?",
+         "Enable <b>Menu bar icon</b> in Settings > Recording Agent. "
+         "Close the window — the app stays in the menu bar. "
+         "Click the tray icon or launch the app again to show the window."),
         ("Can I use a custom LLM endpoint?",
          "Yes — set the <b>Base URL</b> field in Settings to point to any "
          "OpenAI-compatible API endpoint."),
