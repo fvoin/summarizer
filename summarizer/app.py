@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QSize, QTimer, QMimeData
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtGui import (
     QDragEnterEvent, QDropEvent, QFont, QIcon, QPainter, QPixmap, QColor, QPen,
     QPainterPath,
@@ -4062,18 +4063,25 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Summarizer")
 
-    # Single-instance guard (fcntl.flock is released automatically on process death)
-    import fcntl
-    lock_path = Path.home() / ".summarizer" / "summarizer.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    _lock_file = open(lock_path, "w")
-    try:
-        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _lock_file.write(str(os.getpid()))
-        _lock_file.flush()
-    except OSError:
-        _logger.warning("Another instance is already running, exiting.")
+    # Single-instance guard with QLocalServer
+    _server_name = "com.summarizer.single-instance"
+
+    # Try to connect to existing instance
+    socket = QLocalSocket()
+    socket.connectToServer(_server_name)
+    if socket.waitForConnected(500):
+        # Another instance is running — ask it to show
+        socket.write(b"show")
+        socket.waitForBytesWritten(1000)
+        socket.disconnectFromServer()
+        _logger.info("Sent show signal to running instance, exiting.")
         sys.exit(0)
+
+    # No existing instance — start server
+    # Remove stale socket file (e.g. after crash)
+    QLocalServer.removeServer(_server_name)
+    _local_server = QLocalServer()
+    _local_server.listen(_server_name)
 
     app.setStyle("Fusion")
     theme.apply_palette(app)
@@ -4087,6 +4095,16 @@ def main():
 
     window = MainWindow()
     window.show()
+
+    # Handle "show" signals from new instances
+    def _on_new_connection():
+        conn = _local_server.nextPendingConnection()
+        if conn:
+            conn.waitForReadyRead(1000)
+            conn.close()
+            window._tray_show()
+
+    _local_server.newConnection.connect(_on_new_connection)
 
     # Show quick setup on first run (no API key configured yet)
     cfg = config.load()
