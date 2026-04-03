@@ -4102,7 +4102,10 @@ def main():
         if conn:
             conn.waitForReadyRead(1000)
             conn.close()
+            _logger.info("Received show signal from new instance")
             window._tray_show()
+            # Ensure window comes to front after policy switch
+            QTimer.singleShot(200, lambda: (window.raise_(), window.activateWindow()))
 
     _local_server.newConnection.connect(_on_new_connection)
 
