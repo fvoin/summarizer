@@ -13,12 +13,12 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "settings_title":           {"en": "Settings",                            "ru": "Settings"},
 
     # ── Main window labels ───────────────────────────────────────────────
-    "context_label":            {"en": "Context:",                            "ru": "Контекст:"},
+    "context_label":            {"en": "Meeting series:",                     "ru": "Серия встреч:"},
     "context_none":             {"en": "(none)",                              "ru": "(нет)"},
     "context_add_tooltip":      {"en": "Create new named context",            "ru": "Создать новый контекст"},
     "context_edit_tooltip":     {"en": "Edit context file in default editor", "ru": "Открыть файл контекста в редакторе"},
     "context_delete_tooltip":   {"en": "Delete selected context",             "ru": "Удалить выбранный контекст"},
-    "general_context_label":    {"en": "General context",                     "ru": "Общий контекст"},
+    "general_context_label":    {"en": "Persistent context",                  "ru": "Постоянный контекст"},
     "general_context_placeholder": {
         "en": "Key info: meeting type, goals, usual participants, key terms…",
         "ru": "Ключевая информация: тип встреч, цели, обычные участники, ключевые термины…",
@@ -33,8 +33,8 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "stop_recording":           {"en": "  Stop  {time}",                      "ru": "  Стоп  {time}"},
     "summarize_audio":          {"en": "Summarize Audio File",                "ru": "Суммировать аудио"},
     "summarize_transcript":     {"en": "Summarize Transcript",                "ru": "Суммировать текст"},
-    "drop_hint":                {"en": "or drag & drop audio / transcript files here",
-                                 "ru": "или перетащите аудио / текстовые файлы сюда"},
+    "drop_hint":                {"en": "drag & drop or click to open audio / text files",
+                                 "ru": "перетащите или нажмите для открытия аудио / текстовых файлов"},
     "copy_summary":             {"en": "  Copy Summary",                      "ru": "  Копировать итог"},
     "copy_transcript":          {"en": "  Copy Transcript",                   "ru": "  Копировать транскрипт"},
     "open_transcript":          {"en": "  Open Transcript",                   "ru": "  Открыть транскрипт"},
@@ -84,10 +84,10 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "error_file_empty":         {"en": "File is empty",                       "ru": "Файл пуст"},
 
     # ── Dialogs ──────────────────────────────────────────────────────────
-    "new_context_title":        {"en": "New Context",                         "ru": "Новый контекст"},
-    "new_context_prompt":       {"en": "Context name:",                       "ru": "Название контекста:"},
-    "delete_context_title":     {"en": "Delete Context",                      "ru": "Удалить контекст"},
-    "delete_context_confirm":   {"en": "Delete context '{name}'?",            "ru": "Удалить контекст «{name}»?"},
+    "new_context_title":        {"en": "New Meeting Series",                  "ru": "Новая серия встреч"},
+    "new_context_prompt":       {"en": "Meeting series name:",                "ru": "Название серии встреч:"},
+    "delete_context_title":     {"en": "Delete Meeting Series",               "ru": "Удалить серию встреч"},
+    "delete_context_confirm":   {"en": "Delete meeting series '{name}'?",     "ru": "Удалить серию встреч «{name}»?"},
 
     # ── Settings dialog ──────────────────────────────────────────────────
     "tab_models":               {"en": "Models",                              "ru": "Модели"},
@@ -306,14 +306,35 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "chat_title":               {"en": "Chat with {name}",                    "ru": "Чат с {name}"},
     "chat_placeholder":         {"en": "Type a message…",                     "ru": "Введите сообщение…"},
     "chat_send":                {"en": "Send",                                "ru": "Отправить"},
-    "context_chat_title":       {"en": "Chat about meetings",                 "ru": "Чат о встречах"},
+    "context_chat_title":       {"en": "Chat about meeting series",            "ru": "Чат о серии встреч"},
     "context_chat_tooltip":     {"en": "Chat about this context",             "ru": "Чат об этом контексте"},
     "context_chat_system":      {
-        "en": "You are a helpful assistant. Answer questions about the meeting based on the context below.\n\n{context}",
-        "ru": "Ты — полезный ассистент. Отвечай на вопросы о встрече на основе контекста ниже.\n\n{context}",
+        "en": "You are a helpful assistant. Answer questions about this meeting series based on the context below.\n\n{context}",
+        "ru": "Ты — полезный ассистент. Отвечай на вопросы о серии встреч на основе контекста ниже.\n\n{context}",
     },
     "btn_yes":                  {"en": "Yes",                                 "ru": "Да"},
     "btn_no":                   {"en": "No",                                  "ru": "Нет"},
+
+    # ── History dialog ───────────────────────────────────────────────────
+    "history_title":            {"en": "Meeting History",                     "ru": "История встреч"},
+    "history_tooltip":          {"en": "Meeting history",                     "ru": "История встреч"},
+    "history_col_context":      {"en": "Meeting series",                     "ru": "Серия встреч"},
+    "history_col_date":         {"en": "Date",                               "ru": "Дата"},
+    "history_col_duration":     {"en": "Duration",                           "ru": "Длительность"},
+    "history_col_actions":      {"en": "Actions",                            "ru": "Действия"},
+    "history_context":          {"en": "Context",                             "ru": "Контекст"},
+    "history_transcript":       {"en": "Transcript",                         "ru": "Транскрипт"},
+    "history_summary":          {"en": "Summary",                            "ru": "Саммари"},
+    "history_empty":            {"en": "No meetings recorded yet.",          "ru": "Пока нет записанных встреч."},
+    "history_view_title":       {"en": "{type} — {title}",                   "ru": "{type} — {title}"},
+
+    # ── Context editor dialog ────────────────────────────────────────────
+    "ctx_editor_title":         {"en": "Edit meeting series — {name}",       "ru": "Редактировать серию встреч — {name}"},
+    "ctx_editor_persistent":    {"en": "Persistent context",                 "ru": "Постоянный контекст"},
+    "ctx_editor_meetings":      {"en": "Meetings",                           "ru": "Встречи"},
+    "ctx_editor_edit":          {"en": "Edit",                               "ru": "Редактировать"},
+    "ctx_editor_save":          {"en": "Save",                               "ru": "Сохранить"},
+    "ctx_editor_no_meetings":   {"en": "No meetings for this context yet.",  "ru": "Пока нет встреч для этого контекста."},
 
     # ── Menu bar / Tray ─────────────────────────────────────────────────
     "tray_show":                {"en": "Show Summarizer",                     "ru": "Показать Summarizer"},

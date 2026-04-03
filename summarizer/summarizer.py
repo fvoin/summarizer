@@ -55,39 +55,30 @@ def _write_context_file(path: Path, general: str, history: str):
 
 
 def load_general_context(name: str) -> str:
-    """Load only the GENERAL section of a context file."""
-    path = config.get_recordings_dir() / f"{name}_context.txt"
-    general, _ = _parse_context_file(path)
-    return general
+    from . import db
+    return db.load_general_context(name)
 
 
 def save_general_context(name: str, general: str):
-    """Save updated GENERAL section, preserving HISTORY."""
-    rdir = config.get_recordings_dir()
-    rdir.mkdir(parents=True, exist_ok=True)
-    path = rdir / f"{name}_context.txt"
-    _, history = _parse_context_file(path)
-    _write_context_file(path, general, history)
+    from . import db
+    if not db.get_context_id(name):
+        db.create_context(name)
+    db.save_general_context(name, general)
 
 
 def create_context(name: str):
-    """Create an empty context file if it doesn't exist."""
-    rdir = config.get_recordings_dir()
-    rdir.mkdir(parents=True, exist_ok=True)
-    path = rdir / f"{name}_context.txt"
-    if not path.exists():
-        _write_context_file(path, "", "")
+    from . import db
+    db.create_context(name)
 
 
 def load_context_for_prompt(name: str, general_text: str, meeting_text: str) -> Optional[str]:
     """Build the context string for the LLM prompt.
 
     Always includes general_text + meeting_text in full.
-    Fills remaining budget with history entries (newest first).
+    Fills remaining budget with history entries (newest first) from db.
     """
+    from . import db
     limit = config.load().get("context_limit", 5000)
-    path = config.get_recordings_dir() / f"{name}_context.txt"
-    _, history = _parse_context_file(path)
 
     parts = []
     budget = limit
@@ -99,66 +90,63 @@ def load_context_for_prompt(name: str, general_text: str, meeting_text: str) -> 
         parts.append(f"This meeting context:\n{meeting_text}")
         budget -= len(parts[-1])
 
-    if history and budget > 0:
-        trimmed = history
-        if len(trimmed) > budget:
-            trimmed = trimmed[:budget]
-            cut = trimmed.rfind("\n[")
-            if cut > 0:
-                trimmed = trimmed[:cut]
-        if trimmed.strip():
-            parts.append(f"Previous meetings:\n{trimmed.strip()}")
+    if budget > 0:
+        meetings = db.list_meetings(context_name=name, limit=20)
+        history_parts = []
+        for m in meetings:
+            if m.get("summary"):
+                lines = [f"[{m['started_at']}]"]
+                mtg_ctx = m.get("meeting_context", "").strip()
+                if mtg_ctx:
+                    lines.append(f"Meeting context: {mtg_ctx}")
+                lines.append(f"Summary: {m['summary']}")
+                entry = "\n".join(lines)
+                if len(entry) > budget:
+                    break
+                history_parts.append(entry)
+                budget -= len(entry)
+        if history_parts:
+            parts.append(f"Previous meetings:\n" + "\n\n".join(history_parts))
 
     return "\n\n".join(parts) if parts else None
 
 
 def save_to_context(name: str, summary: str, general_text: str = "",
-                    meeting_text: str = ""):
-    rdir = config.get_recordings_dir()
-    rdir.mkdir(parents=True, exist_ok=True)
-    path = rdir / f"{name}_context.txt"
-    _, old_history = _parse_context_file(path)
-
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    entry_parts = [f"[{date_str}]"]
-    if meeting_text:
-        entry_parts.append(f"Meeting context: {meeting_text}")
-    entry_parts.append(f"Summary: {summary}")
-    new_entry = "\n".join(entry_parts)
-
-    history = f"{new_entry}\n\n{old_history}".strip() if old_history else new_entry
-    _write_context_file(path, general_text, history)
+                    meeting_text: str = "", transcript: str = "",
+                    duration_seconds: int = 0, profile_name: str = "",
+                    started_at: Optional[datetime] = None):
+    """Save meeting to db and update general context."""
+    from . import db
+    if not db.get_context_id(name):
+        db.create_context(name)
+    if general_text:
+        db.save_general_context(name, general_text)
+    db.save_meeting(
+        context_name=name,
+        title=name,
+        started_at=started_at or datetime.now(),
+        duration_seconds=duration_seconds,
+        meeting_context=meeting_text,
+        transcript=transcript,
+        summary=summary,
+        profile_name=profile_name,
+    )
 
 
 def update_latest_context_entry(name: str, new_summary: str):
-    """Replace the Summary field in the most recent history entry."""
-    rdir = config.get_recordings_dir()
-    path = rdir / f"{name}_context.txt"
-    general, history = _parse_context_file(path)
-    if not history:
-        return
-    # Find the first "Summary:" line in history and replace until next entry
-    import re
-    updated = re.sub(
-        r"(Summary:)(.+?)(\n\n\[|\Z)",
-        lambda m: m.group(1) + " " + new_summary.strip() + "\n" + m.group(3),
-        history,
-        count=1,
-        flags=re.DOTALL,
-    )
-    _write_context_file(path, general, updated)
+    """Update the summary of the most recent meeting for this context."""
+    from . import db
+    meetings = db.list_meetings(context_name=name, limit=1)
+    if meetings:
+        conn = db.get_connection()
+        conn.execute("UPDATE meetings SET summary = ? WHERE id = ?",
+                      (new_summary, meetings[0]["id"]))
+        conn.commit()
 
 
 def list_contexts() -> list[str]:
-    rdir = config.get_recordings_dir()
-    if not rdir.exists():
-        return []
-    names = []
-    for p in sorted(rdir.glob("*_context.txt")):
-        name = p.stem.removesuffix("_context")
-        if name:
-            names.append(name)
-    return names
+    from . import db
+    return db.list_contexts()
 
 
 # ── prompt building ──────────────────────────────────────────────────────
@@ -323,7 +311,9 @@ def summarize(
     if context_name:
         try:
             save_to_context(context_name, summary, general_text=general_text,
-                            meeting_text=meeting_text)
+                            meeting_text=meeting_text, transcript=transcript,
+                            duration_seconds=duration_seconds or 0,
+                            profile_name=profile_name)
         except Exception as e:
             _log(f"Failed to save context: {e}")
 

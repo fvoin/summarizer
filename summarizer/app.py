@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QTextEdit, QComboBox, QLineEdit,
     QFileDialog, QMessageBox, QDialog, QFormLayout, QSpinBox,
     QGroupBox, QSplitter, QProgressBar, QSizePolicy, QSystemTrayIcon,
+    QTableWidget, QTableWidgetItem, QHeaderView, QScrollArea, QCheckBox,
 )
 
 import logging
@@ -52,6 +53,68 @@ def _ask_yes_no(parent, title: str, text: str) -> bool:
 
 
 # ── Vector icon helpers ──────────────────────────────────────────────────
+
+def _make_eye_icon(size: int = 24, color: QColor = QColor("#4A90D9")) -> QIcon:
+    """Draw a high-quality eye icon using 2x rendering for retina sharpness."""
+    scale = 2
+    s = size * scale
+    pm = QPixmap(s, s)
+    pm.setDevicePixelRatio(scale)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+    # Work in logical coords (size x size)
+    cx, cy = size / 2, size / 2
+    ew = size * 0.42   # eye half-width
+    eh = size * 0.22   # eye half-height
+
+    # Outer eye shape
+    pen = QPen(color, size * 0.065)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+
+    eye = QPainterPath()
+    eye.moveTo(cx - ew, cy)
+    eye.cubicTo(cx - ew * 0.5, cy - eh * 1.6, cx + ew * 0.5, cy - eh * 1.6, cx + ew, cy)
+    eye.cubicTo(cx + ew * 0.5, cy + eh * 1.6, cx - ew * 0.5, cy + eh * 1.6, cx - ew, cy)
+    p.drawPath(eye)
+
+    # Iris circle
+    p.setPen(pen)
+    ir = size * 0.16
+    p.drawEllipse(int(cx - ir), int(cy - ir), int(ir * 2), int(ir * 2))
+
+    # Pupil dot
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    pr = size * 0.07
+    p.drawEllipse(int(cx - pr), int(cy - pr), int(pr * 2), int(pr * 2))
+
+    p.end()
+    return QIcon(pm)
+
+
+def _make_history_icon(size: int = 32, color: QColor = QColor("#4A90D9")) -> QIcon:
+    """Draw a simple clock icon for history."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(color, size * 0.07, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    m = size * 0.15
+    p.drawEllipse(int(m), int(m), int(size - m * 2), int(size - m * 2))
+    cx, cy = size / 2, size / 2
+    p.drawLine(int(cx), int(cy), int(cx), int(cy - size * 0.22))
+    p.drawLine(int(cx), int(cy), int(cx + size * 0.18), int(cy))
+    p.end()
+    return QIcon(pm)
+
 
 def _make_chat_icon(size: int = 32, color: QColor = QColor("#4A90D9")) -> QIcon:
     """Draw a simple chat bubble icon."""
@@ -1242,7 +1305,7 @@ class OllamaChatDialog(QDialog):
         sb.setValue(sb.maximum())
 
     def _send(self):
-        text = self._input.text().strip()
+        text = self._input.toPlainText().strip()
         if not text or self._worker is not None:
             return
         self._input.clear()
@@ -1288,6 +1351,14 @@ class OllamaChatDialog(QDialog):
         self._thinking_timer.stop()
         if self._assistant_buf:
             self._messages.append({"role": "assistant", "content": self._assistant_buf})
+            # Re-render with markdown
+            cursor = self._chat_view.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            pos = cursor.position()
+            cursor.setPosition(self._thinking_anchor)
+            cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.insertHtml(_mrkdwn_to_display_html(self._assistant_buf))
         self._worker = None
         self._set_busy(False)
 
@@ -1403,9 +1474,15 @@ class ContextChatDialog(QDialog):
         vlay.addWidget(self._chat_view, 1)
 
         hlay = QHBoxLayout()
-        self._input = QLineEdit()
+        self._input = QTextEdit()
         self._input.setPlaceholderText(t("chat_placeholder"))
-        self._input.returnPressed.connect(self._send)
+        self._input.setMinimumHeight(32)
+        self._input.setMaximumHeight(100)
+        self._input.setFixedHeight(32)
+        self._input.setAcceptRichText(False)
+        self._input.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._input.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._input.installEventFilter(self)
         hlay.addWidget(self._input, 1)
 
         self._send_btn = QPushButton(t("chat_send"))
@@ -1419,6 +1496,22 @@ class ContextChatDialog(QDialog):
         self._thinking_dots = 0
         self._thinking_anchor = 0
         self._thinking_timer.timeout.connect(self._update_thinking)
+
+    def eventFilter(self, obj, event):
+        """Enter sends, Shift+Enter inserts newline, auto-resize height."""
+        if obj is self._input and event.type() == event.Type.KeyPress:
+            from PyQt6.QtCore import QEvent
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    return False  # let Qt insert newline
+                self._send()
+                return True
+        # Auto-resize input height based on content
+        if obj is self._input and event.type() == event.Type.KeyRelease:
+            doc_height = int(self._input.document().size().height()) + 8
+            new_h = max(32, min(100, doc_height))
+            self._input.setFixedHeight(new_h)
+        return super().eventFilter(obj, event)
 
     def _append_text(self, html: str):
         """Append HTML without extra <p> wrapper."""
@@ -1442,7 +1535,7 @@ class ContextChatDialog(QDialog):
         sb.setValue(sb.maximum())
 
     def _send(self):
-        text = self._input.text().strip()
+        text = self._input.toPlainText().strip()
         if not text or self._worker is not None:
             return
         self._input.clear()
@@ -1489,6 +1582,14 @@ class ContextChatDialog(QDialog):
         self._thinking_timer.stop()
         if self._assistant_buf:
             self._messages.append({"role": "assistant", "content": self._assistant_buf})
+            # Re-render the AI response with markdown
+            cursor = self._chat_view.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            pos = cursor.position()
+            cursor.setPosition(self._thinking_anchor)
+            cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.insertHtml(_mrkdwn_to_display_html(self._assistant_buf))
         self._append_text("<br>")
         self._worker = None
         self._set_busy(False)
@@ -1506,6 +1607,361 @@ class ContextChatDialog(QDialog):
             self._worker.terminate()
             self._worker.wait(2000)
         super().closeEvent(event)
+
+
+def _mrkdwn_to_display_html(text: str) -> str:
+    """Convert mrkdwn/markdown bold/italic/headers to HTML for display."""
+    import re
+    body = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Headers: # text, ## text, ### text, #### text → bold
+    body = re.sub(r"^#{1,6}\s+(.+)$", r"<b>\1</b>", body, flags=re.MULTILINE)
+    # **bold** (markdown double asterisk)
+    body = re.sub(r"\*\*([^\n*]+?)\*\*", r"<b>\1</b>", body)
+    # *bold* (slack mrkdwn single asterisk)
+    body = re.sub(r"(?<!\w)\*([^\n*]+?)\*(?!\w)", r"<b>\1</b>", body)
+    # _italic_
+    body = re.sub(r"(?<!\w)_([^\n_]+?)_(?!\w)", r"<i>\1</i>", body)
+    body = body.replace("\n", "<br>")
+    return body
+
+
+class _TextViewDialog(QDialog):
+    """Text viewer/editor with optional save callback. Shows rendered markdown."""
+
+    def __init__(self, title: str, text: str, parent=None,
+                 save_cb=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(560, 420)
+        self._save_cb = save_cb
+        self._raw_text = text
+        self._editing = False
+
+        vlay = QVBoxLayout(self)
+        self._view = QTextEdit()
+        self._view.setReadOnly(True)
+        self._view.setHtml(_mrkdwn_to_display_html(text))
+        vlay.addWidget(self._view, 1)
+
+        if save_cb:
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            self._edit_btn = QPushButton(t("ctx_editor_edit"))
+            self._edit_btn.setStyleSheet(theme.btn_secondary())
+            self._edit_btn.clicked.connect(self._toggle_edit)
+            btn_row.addWidget(self._edit_btn)
+            self._save_btn = QPushButton(t("ctx_editor_save"))
+            self._save_btn.setStyleSheet(theme.btn_secondary())
+            self._save_btn.clicked.connect(self._save)
+            self._save_btn.setVisible(False)
+            btn_row.addWidget(self._save_btn)
+            vlay.addLayout(btn_row)
+
+    def _toggle_edit(self):
+        self._editing = not self._editing
+        if self._editing:
+            self._view.setReadOnly(False)
+            self._view.setPlainText(self._raw_text)
+            self._edit_btn.setVisible(False)
+            self._save_btn.setVisible(True)
+        else:
+            self._raw_text = self._view.toPlainText()
+            self._view.setReadOnly(True)
+            self._view.setHtml(_mrkdwn_to_display_html(self._raw_text))
+            self._edit_btn.setVisible(True)
+            self._save_btn.setVisible(False)
+
+    def _save(self):
+        if self._save_cb:
+            self._raw_text = self._view.toPlainText()
+            self._save_cb(self._raw_text)
+        self.accept()
+
+
+class ContextEditorDialog(QDialog):
+    """Editor for a context: persistent context + meeting history table."""
+
+    def __init__(self, context_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("ctx_editor_title", name=context_name))
+        self.resize(700, 500)
+        self._name = context_name
+
+        from . import db
+
+        vlay = QVBoxLayout(self)
+
+        # Persistent context
+        lbl = QLabel(t("ctx_editor_persistent"))
+        lbl.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
+        vlay.addWidget(lbl)
+        self._ctx_edit = QTextEdit()
+        self._ctx_edit.setPlainText(db.load_general_context(context_name))
+        self._ctx_edit.setMaximumHeight(120)
+        vlay.addWidget(self._ctx_edit)
+
+        # Meetings list (same style as HistoryDialog)
+        vlay.addSpacing(12)
+        mtg_lbl = QLabel(t("ctx_editor_meetings"))
+        mtg_lbl.setStyleSheet(f"font-size: 12px; color: {C['text_secondary']};")
+        vlay.addWidget(mtg_lbl)
+
+        meetings = db.list_meetings(context_name=context_name)
+        if meetings:
+            _no_border = "border: none; background: transparent;"
+
+            # Column header
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(8, 0, 8, 4)
+            header_row.setSpacing(12)
+            for label_text, width in [
+                (t("history_col_date"), 120),
+                (t("history_col_duration"), 90),
+            ]:
+                h_lbl = QLabel(f"<b>{label_text}</b>")
+                h_lbl.setFixedWidth(width)
+                h_lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; {_no_border}")
+                header_row.addWidget(h_lbl)
+            header_row.addStretch()
+            for label_text in [t("history_context"), t("history_transcript"), t("history_summary")]:
+                h_lbl = QLabel(f"<b>{label_text}</b>")
+                h_lbl.setFixedWidth(90)
+                h_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                h_lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; {_no_border}")
+                header_row.addWidget(h_lbl)
+            vlay.addLayout(header_row)
+
+            # Scrollable rows
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(scroll.Shape.NoFrame)
+            inner = QWidget()
+            inner_lay = QVBoxLayout(inner)
+            inner_lay.setSpacing(0)
+            inner_lay.setContentsMargins(0, 0, 0, 0)
+
+            eye = _make_eye_icon(16, QColor(C["primary"]))
+            for m in meetings:
+                row = QWidget()
+                row.setStyleSheet(f"border-bottom: 1px solid {C['border']};")
+                hlay = QHBoxLayout(row)
+                hlay.setContentsMargins(8, 6, 8, 6)
+                hlay.setSpacing(12)
+
+                ts = m.get("started_at", "")[:16].replace("T", " ")
+                dur = m.get("duration_seconds", 0)
+                dur_str = f"{dur // 60}m {dur % 60}s" if dur else "—"
+
+                date_lbl = QLabel(ts)
+                date_lbl.setStyleSheet(f"color: {C['text_secondary']}; {_no_border}")
+                date_lbl.setFixedWidth(120)
+                hlay.addWidget(date_lbl)
+
+                dur_lbl = QLabel(dur_str)
+                dur_lbl.setStyleSheet(f"color: {C['text_muted']}; {_no_border}")
+                dur_lbl.setFixedWidth(90)
+                hlay.addWidget(dur_lbl)
+
+                hlay.addStretch()
+
+                for field, tip in [
+                    ("meeting_context", t("history_context")),
+                    ("transcript", t("history_transcript")),
+                    ("summary", t("history_summary")),
+                ]:
+                    btn_wrap = QWidget()
+                    btn_wrap.setFixedWidth(90)
+                    btn_wrap.setStyleSheet(_no_border)
+                    blay = QHBoxLayout(btn_wrap)
+                    blay.setContentsMargins(0, 0, 0, 0)
+                    blay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    has_content = bool(m.get(field, "").strip())
+                    if has_content:
+                        btn = QPushButton()
+                        btn.setIcon(eye)
+                        btn.setIconSize(QSize(16, 16))
+                        btn.setFixedSize(28, 28)
+                        btn.setToolTip(tip)
+                        btn.setStyleSheet(theme.ghost_btn() + f" QPushButton {{ {_no_border} }}")
+                        btn.clicked.connect(lambda _, mid=m["id"], f=field: self._view_text(mid, f))
+                        blay.addWidget(btn)
+                    hlay.addWidget(btn_wrap)
+
+                inner_lay.addWidget(row)
+
+            inner_lay.addStretch()
+            scroll.setWidget(inner)
+            vlay.addWidget(scroll, 1)
+        else:
+            empty = QLabel(t("ctx_editor_no_meetings"))
+            empty.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vlay.addWidget(empty, 1)
+
+        # Save button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        save_btn = QPushButton(t("ctx_editor_save"))
+        save_btn.setStyleSheet(theme.btn_secondary())
+        save_btn.clicked.connect(self._save)
+        btn_row.addWidget(save_btn)
+        vlay.addLayout(btn_row)
+
+    def _view_text(self, meeting_id: int, field: str):
+        from . import db
+        m = db.get_meeting(meeting_id)
+        if not m:
+            return
+        text = m.get(field, "")
+        field_labels = {
+            "meeting_context": t("history_context"),
+            "transcript": t("history_transcript"),
+            "summary": t("history_summary"),
+        }
+        type_label = field_labels.get(field, field)
+        title = t("history_view_title", type=type_label, title=self._name)
+
+        def save_cb(new_text, mid=meeting_id, f=field):
+            conn = db.get_connection()
+            conn.execute(f"UPDATE meetings SET {f} = ? WHERE id = ?", (new_text, mid))
+            conn.commit()
+
+        dlg = _TextViewDialog(title, text, self, save_cb=save_cb)
+        dlg.exec()
+
+    def _save(self):
+        from . import db
+        db.save_general_context(self._name, self._ctx_edit.toPlainText().strip())
+        self.accept()
+
+
+class HistoryDialog(QDialog):
+    """Dialog showing all recorded meetings."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("history_title"))
+        self.resize(700, 500)
+
+        from . import db
+
+        vlay = QVBoxLayout(self)
+        vlay.setContentsMargins(12, 12, 12, 12)
+        self._meetings = db.list_meetings()
+
+        if not self._meetings:
+            empty = QLabel(t("history_empty"))
+            empty.setStyleSheet(f"color: {C['text_muted']}; font-size: 13px;")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vlay.addWidget(empty, 1)
+            return
+
+        # Column header
+        _no_border = "border: none; background: transparent;"
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(8, 0, 8, 4)
+        header_row.setSpacing(12)
+        for label_text, width in [
+            (t("history_col_context"), 240),
+            (t("history_col_date"), 120),
+            (t("history_col_duration"), 90),
+        ]:
+            lbl = QLabel(f"<b>{label_text}</b>")
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; {_no_border}")
+            header_row.addWidget(lbl)
+        header_row.addStretch()
+        for label_text in [t("history_transcript"), t("history_summary")]:
+            lbl = QLabel(f"<b>{label_text}</b>")
+            lbl.setFixedWidth(90)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; {_no_border}")
+            header_row.addWidget(lbl)
+        vlay.addLayout(header_row)
+
+        # Scrollable rows
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        inner = QWidget()
+        inner_lay = QVBoxLayout(inner)
+        inner_lay.setSpacing(0)
+        inner_lay.setContentsMargins(0, 0, 0, 0)
+
+        eye = _make_eye_icon(16, QColor(C["primary"]))
+        for m in self._meetings:
+            row = QWidget()
+            row.setStyleSheet(f"border-bottom: 1px solid {C['border']};")
+            hlay = QHBoxLayout(row)
+            hlay.setContentsMargins(8, 6, 8, 6)
+            hlay.setSpacing(12)
+
+            ctx = m.get("context_name") or "—"
+            ts = m.get("started_at", "")[:16].replace("T", " ")
+            dur = m.get("duration_seconds", 0)
+            if dur:
+                mins, secs = divmod(dur, 60)
+                dur_str = f"{mins}m {secs}s"
+            else:
+                dur_str = "—"
+
+            ctx_lbl = QLabel(f"<b>{ctx}</b>")
+            ctx_lbl.setFixedWidth(240)
+            ctx_lbl.setStyleSheet(_no_border)
+            hlay.addWidget(ctx_lbl)
+
+            date_lbl = QLabel(ts)
+            date_lbl.setStyleSheet(f"color: {C['text_secondary']}; {_no_border}")
+            date_lbl.setFixedWidth(120)
+            hlay.addWidget(date_lbl)
+
+            dur_lbl = QLabel(dur_str)
+            dur_lbl.setStyleSheet(f"color: {C['text_muted']}; {_no_border}")
+            dur_lbl.setFixedWidth(90)
+            hlay.addWidget(dur_lbl)
+
+            hlay.addStretch()
+
+            for field, tip in [("transcript", t("history_transcript")), ("summary", t("history_summary"))]:
+                btn_wrap = QWidget()
+                btn_wrap.setFixedWidth(90)
+                btn_wrap.setStyleSheet(_no_border)
+                blay = QHBoxLayout(btn_wrap)
+                blay.setContentsMargins(0, 0, 0, 0)
+                blay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                has_content = bool(m.get(field, "").strip())
+                if has_content:
+                    btn = QPushButton()
+                    btn.setIcon(eye)
+                    btn.setIconSize(QSize(16, 16))
+                    btn.setFixedSize(28, 28)
+                    btn.setToolTip(tip)
+                    btn.setStyleSheet(theme.ghost_btn() + f" QPushButton {{ {_no_border} }}")
+                    btn.clicked.connect(lambda _, mid=m["id"], title=ctx, f=field: self._view_text(mid, f, title))
+                    blay.addWidget(btn)
+                hlay.addWidget(btn_wrap)
+
+            inner_lay.addWidget(row)
+
+        inner_lay.addStretch()
+        scroll.setWidget(inner)
+        vlay.addWidget(scroll, 1)
+
+    def _view_text(self, meeting_id: int, field: str, title: str):
+        from . import db
+        m = db.get_meeting(meeting_id)
+        if not m:
+            return
+        text = m.get(field, "")
+        dlg_title = t("history_view_title", type=t(f"history_{field}"), title=title)
+
+        def save_cb(new_text, mid=meeting_id, f=field):
+            conn = db.get_connection()
+            conn.execute(f"UPDATE meetings SET {f} = ? WHERE id = ?", (new_text, mid))
+            conn.commit()
+
+        dlg = _TextViewDialog(dlg_title, text, self, save_cb=save_cb)
+        dlg.exec()
 
 
 class _LocalLLMRow(QWidget):
@@ -2422,6 +2878,14 @@ class MainWindow(QMainWindow):
         title.setStyleSheet(f"color: {C['primary']};")
         top.addWidget(title)
         top.addStretch()
+        history_btn = QPushButton()
+        history_btn.setIcon(_make_history_icon(32, QColor(C["text_secondary"])))
+        history_btn.setIconSize(QSize(22, 22))
+        history_btn.setFixedSize(36, 36)
+        history_btn.setToolTip(t("history_tooltip"))
+        history_btn.setStyleSheet(theme.ghost_btn())
+        history_btn.clicked.connect(self._open_history)
+        top.addWidget(history_btn)
         settings_btn = QPushButton()
         settings_btn.setIcon(_make_gear_icon(32, QColor(C["text_secondary"])))
         settings_btn.setIconSize(QSize(22, 22))
@@ -2434,8 +2898,8 @@ class MainWindow(QMainWindow):
         root.addSpacing(4)
 
         # ── context section ──
-        _lbl_w = 90   # fixed label width for alignment
-        _combo_w = 220  # fixed combo width for both rows
+        _lbl_w = 90
+        _combo_w = 220
         ctx_row = QHBoxLayout()
         named_lbl = QLabel(t("context_label"))
         named_lbl.setFixedWidth(_lbl_w)
@@ -2454,25 +2918,30 @@ class MainWindow(QMainWindow):
         add_ctx_btn.clicked.connect(self._add_context)
         ctx_row.addWidget(add_ctx_btn)
 
+        # Context action buttons in a fixed-width container
+        self._ctx_actions = QWidget()
+        self._ctx_actions.setFixedWidth(100)
+        act_lay = QHBoxLayout(self._ctx_actions)
+        act_lay.setContentsMargins(0, 0, 0, 0)
+        act_lay.setSpacing(2)
+
         self._edit_ctx_btn = QPushButton("✏")
-        self._edit_ctx_btn.setFixedSize(36, 36)
+        self._edit_ctx_btn.setFixedSize(28, 28)
         self._edit_ctx_btn.setToolTip(t("context_edit_tooltip"))
         self._edit_ctx_btn.setStyleSheet(theme.btn_secondary() + f"""
-            QPushButton {{ font-size: 18px; padding: 0px; color: {C['warning']}; }}
+            QPushButton {{ font-size: 16px; padding: 0px; color: {C['warning']}; }}
         """)
         self._edit_ctx_btn.clicked.connect(self._edit_context)
-        self._edit_ctx_btn.setVisible(False)
-        ctx_row.addWidget(self._edit_ctx_btn)
+        act_lay.addWidget(self._edit_ctx_btn)
 
         self._del_ctx_btn = QPushButton("×")
         self._del_ctx_btn.setFixedSize(28, 28)
         self._del_ctx_btn.setToolTip(t("context_delete_tooltip"))
         self._del_ctx_btn.setStyleSheet(theme.btn_secondary() + f"""
-            QPushButton {{ font-size: 18px; font-weight: bold; padding: 0px; color: {C['error']}; }}
+            QPushButton {{ font-size: 16px; font-weight: bold; padding: 0px; color: {C['error']}; }}
         """)
         self._del_ctx_btn.clicked.connect(self._delete_context)
-        self._del_ctx_btn.setVisible(False)
-        ctx_row.addWidget(self._del_ctx_btn)
+        act_lay.addWidget(self._del_ctx_btn)
 
         self._chat_ctx_btn = QPushButton()
         self._chat_ctx_btn.setFixedSize(28, 28)
@@ -2481,8 +2950,10 @@ class MainWindow(QMainWindow):
         self._chat_ctx_btn.setToolTip(t("context_chat_tooltip"))
         self._chat_ctx_btn.setStyleSheet(theme.ghost_btn())
         self._chat_ctx_btn.clicked.connect(self._open_context_chat)
-        self._chat_ctx_btn.setVisible(False)
-        ctx_row.addWidget(self._chat_ctx_btn)
+        act_lay.addWidget(self._chat_ctx_btn)
+
+        self._ctx_actions.setVisible(False)
+        ctx_row.addWidget(self._ctx_actions)
         ctx_row.addStretch()
         self.context_combo.currentIndexChanged.connect(self._on_context_combo_changed)
         root.addLayout(ctx_row)
@@ -2503,20 +2974,11 @@ class MainWindow(QMainWindow):
         root.addLayout(profile_row)
         root.addSpacing(12)
 
-        self._gen_lbl = QLabel(t("general_context_label"))
-        self._gen_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin: 0;")
-        self._gen_lbl.setContentsMargins(0, 0, 0, 0)
+        # General context is hidden — editable via context editor dialog
+        self._gen_lbl = QLabel()
         self._gen_lbl.setVisible(False)
-        root.addWidget(self._gen_lbl)
         self.general_ctx = QTextEdit()
-        self.general_ctx.setPlaceholderText(t("general_context_placeholder"))
-        self.general_ctx.setMinimumHeight(68)
-        self.general_ctx.setMaximumHeight(90)
-        self.general_ctx.setAcceptRichText(False)
         self.general_ctx.setVisible(False)
-        self.general_ctx.setSizePolicy(self.general_ctx.sizePolicy().horizontalPolicy(),
-                                        QSizePolicy.Policy.Preferred)
-        root.addWidget(self.general_ctx)
 
         self._mtg_lbl = QLabel(t("meeting_context_label"))
         self._mtg_lbl.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']}; margin: 0;")
@@ -2543,27 +3005,22 @@ class MainWindow(QMainWindow):
         self.record_btn.clicked.connect(self._toggle_recording)
         root.addWidget(self.record_btn)
 
-        # ── file buttons ──
-        file_row = QHBoxLayout()
-        file_row.setSpacing(10)
-        open_wav = QPushButton(t("summarize_audio"))
-        open_wav.setStyleSheet(theme.btn_secondary())
-        open_wav.clicked.connect(self._open_audio)
-        open_txt = QPushButton(t("summarize_transcript"))
-        open_txt.setStyleSheet(theme.btn_secondary())
-        open_txt.clicked.connect(self._open_transcript)
-        file_row.addWidget(open_wav)
-        file_row.addWidget(open_txt)
-        root.addLayout(file_row)
-
-        # ── drop zone ──
-        self.drop_label = QLabel(t("drop_hint"))
-        self.drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # ── drop zone (clickable) ──
+        self.drop_label = QPushButton(t("drop_hint"))
+        self.drop_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.drop_label.setStyleSheet(f"""
-            color: {C['text_muted']};
-            font-size: 12px;
-            padding: 2px;
+            QPushButton {{
+                color: {C['text_muted']};
+                font-size: 12px;
+                padding: 4px;
+                border: none;
+                background: transparent;
+            }}
+            QPushButton:hover {{
+                color: {C['primary']};
+            }}
         """)
+        self.drop_label.clicked.connect(self._open_file)
         root.addWidget(self.drop_label)
 
         # ── status row ──
@@ -2795,11 +3252,7 @@ class MainWindow(QMainWindow):
 
         name = self.context_combo.currentData()
         has_selection = bool(name)
-        self._edit_ctx_btn.setVisible(has_selection)
-        self._del_ctx_btn.setVisible(has_selection)
-        self._chat_ctx_btn.setVisible(has_selection)
-        self._gen_lbl.setVisible(has_selection)
-        self.general_ctx.setVisible(has_selection)
+        self._ctx_actions.setVisible(has_selection)
 
         if has_selection:
             general = load_general_context(name)
@@ -2864,9 +3317,28 @@ class MainWindow(QMainWindow):
         self._on_context_combo_changed()
 
     def _add_context(self):
-        from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, t("new_context_title"), t("new_context_prompt"))
-        if ok and name.strip():
+        dlg = QDialog(self)
+        dlg.setWindowTitle(t("new_context_title"))
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(t("new_context_prompt")))
+        name_edit = QLineEdit()
+        lay.addWidget(name_edit)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton(t("btn_yes"))
+        ok_btn.setStyleSheet(theme.btn_secondary())
+        ok_btn.clicked.connect(dlg.accept)
+        cancel_btn = QPushButton(t("btn_no"))
+        cancel_btn.setStyleSheet(theme.btn_secondary())
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        lay.addLayout(btn_row)
+        name_edit.returnPressed.connect(dlg.accept)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name = name_edit.text().strip()
+        if name:
             create_context(name.strip())
             self._prev_context_name = None
             self._refresh_contexts()
@@ -2891,32 +3363,45 @@ class MainWindow(QMainWindow):
         name = self.context_combo.currentData()
         if not name:
             return
-        from PyQt6.QtGui import QDesktopServices
-        rdir = config.get_recordings_dir()
-        ctx_file = rdir / f"{name}_context.txt"
-        ctx_file.touch(exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(ctx_file)))
+        dlg = ContextEditorDialog(name, parent=self)
+        dlg.exec()
+        # Reload general context after editing
+        from .summarizer import load_general_context
+        self.general_ctx.setPlainText(load_general_context(name))
 
     def _open_context_chat(self):
-        """Open a chat dialog with the current context."""
+        """Open a chat dialog with the current meeting series context from db."""
+        from . import db
         name = self.context_combo.currentData()
         if not name:
             return
-        # Read the entire context file (general + history)
-        rdir = config.get_recordings_dir()
-        ctx_file = rdir / f"{name}_context.txt"
-        context_text = ""
-        if ctx_file.exists():
-            try:
-                context_text = ctx_file.read_text(encoding="utf-8").strip()
-            except Exception:
-                pass
-        # Add current meeting context from UI
+
+        # Build context from db
+        parts = []
+        general = db.load_general_context(name)
+        if general:
+            parts.append(f"Persistent context:\n{general}")
+
+        # Recent meetings with meeting_context + summary
+        meetings = db.list_meetings(context_name=name, limit=20)
+        history = []
+        for m in meetings:
+            if m.get("summary"):
+                lines = [f"[{m['started_at']}]"]
+                mtg_ctx = m.get("meeting_context", "").strip()
+                if mtg_ctx:
+                    lines.append(f"Meeting context: {mtg_ctx}")
+                lines.append(f"Summary: {m['summary']}")
+                history.append("\n".join(lines))
+        if history:
+            parts.append(f"Recent meeting summaries:\n\n" + "\n\n".join(history))
+
+        # Current meeting context from UI
         meeting = self.meeting_ctx.toPlainText().strip()
         if meeting:
-            context_text += f"\n\nCurrent meeting context:\n{meeting}"
-        if not context_text:
-            context_text = "No context available."
+            parts.append(f"Current meeting context:\n{meeting}")
+
+        context_text = "\n\n".join(parts) if parts else "No context available."
         summary = self.result_text.toPlainText().strip()
         dlg = ContextChatDialog(context_text, summary_text=summary, context_name=name, parent=self)
         dlg.exec()
@@ -2963,6 +3448,7 @@ class MainWindow(QMainWindow):
         )
         self._recorder.start(on_auto_stop=lambda: self._auto_stop_signal.emit())
         self._recording_start = time.monotonic()
+        self._recording_wall_time = datetime.now()
         self.record_btn.setText(t("stop_recording", time="0:00"))
         self.record_btn.setIcon(self._stop_icon)
         self.record_btn.setStyleSheet(theme.btn_recording())
@@ -3195,6 +3681,23 @@ class MainWindow(QMainWindow):
 
     # ── file open ────────────────────────────────────────────────────
 
+    def _open_file(self):
+        """Open a file dialog for both audio and transcript files."""
+        audio_exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS))
+        text_exts = " ".join(f"*{e}" for e in sorted(TRANSCRIPT_EXTENSIONS))
+        all_exts = f"{audio_exts} {text_exts}"
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("open_audio_title"), "",
+            f"All supported ({all_exts});;Audio ({audio_exts});;Text ({text_exts})",
+        )
+        if not path:
+            return
+        ext = Path(path).suffix.lower()
+        if ext in AUDIO_EXTENSIONS:
+            self._process_audio(path)
+        elif ext in TRANSCRIPT_EXTENSIONS:
+            self._process_transcript_file(path)
+
     def _open_audio(self):
         exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTENSIONS))
         path, _ = QFileDialog.getOpenFileName(self, t("open_audio_title"), "", f"Audio ({exts})")
@@ -3364,37 +3867,59 @@ class MainWindow(QMainWindow):
         self._set_busy(False)
         self._saved_summary = summary
         self._summary_context_name = self.context_combo.currentData() or None
+        self._last_meeting_id = None
         self.result_text.setPlainText(summary)
         self.copy_btn.setEnabled(True)
         self.transcript_btn.setEnabled(bool(self._current_transcript_path))
         self.update_ctx_btn.setVisible(False)
         self._set_status(t("status_done"), "done")
         self._refresh_contexts()
+        # Save context-less meetings to db
+        if not self._summary_context_name:
+            try:
+                from . import db
+                self._last_meeting_id = db.save_meeting(
+                    context_name=None,
+                    title="Meeting",
+                    started_at=getattr(self, "_recording_wall_time", None),
+                    duration_seconds=getattr(self, "_pending_duration", 0) or 0,
+                    meeting_context=self.meeting_ctx.toPlainText().strip(),
+                    transcript=self._current_transcript or "",
+                    summary=summary,
+                    profile_name=self.profile_select.currentData() or "",
+                )
+            except Exception as e:
+                _logger.warning("Failed to save meeting to db: %s", e)
         if config.load().get("sound_on_done", True):
             self._play_done_sound()
 
     def _on_result_text_changed(self):
-        if not self._saved_summary or not self._summary_context_name:
+        if not self._saved_summary:
             return
         current = self.result_text.toPlainText()
         self.update_ctx_btn.setVisible(current != self._saved_summary)
 
     def _update_context_entry(self):
-        from .summarizer import update_latest_context_entry
-        name = self._summary_context_name
-        if not name:
-            return
         new_text = self.result_text.toPlainText().strip()
         if not new_text:
             return
         try:
-            update_latest_context_entry(name, new_text)
+            name = self._summary_context_name
+            if name:
+                from .summarizer import update_latest_context_entry
+                update_latest_context_entry(name, new_text)
+            elif self._last_meeting_id:
+                from . import db
+                conn = db.get_connection()
+                conn.execute("UPDATE meetings SET summary = ? WHERE id = ?",
+                             (new_text, self._last_meeting_id))
+                conn.commit()
             self._saved_summary = new_text
             self.update_ctx_btn.setVisible(False)
             self._set_status(t("status_context_updated"), "done")
         except Exception as e:
-            _logger.error("Failed to update context: %s", e)
-            QMessageBox.warning(self, t("error_title"), f"Could not update context: {e}")
+            _logger.error("Failed to update: %s", e)
+            QMessageBox.warning(self, t("error_title"), str(e))
 
     @staticmethod
     def _play_done_sound():
@@ -3480,6 +4005,10 @@ class MainWindow(QMainWindow):
         else:
             self._set_status(t("status_no_transcript"), "error")
 
+    def _open_history(self):
+        dlg = HistoryDialog(self)
+        dlg.exec()
+
     def _open_settings(self):
         if not hasattr(self, "_bg_whisper_downloads"):
             self._bg_whisper_downloads: dict = {}
@@ -3515,6 +4044,10 @@ def main():
     import logging
     _logger = logging.getLogger("app")
     _logger.info("Summarizer starting")
+
+    # Migrate file-based contexts to SQLite
+    from . import db
+    db.migrate_from_files()
 
     # Apply theme before creating any widgets
     cfg = config.load()
