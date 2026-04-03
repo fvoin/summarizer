@@ -4060,7 +4060,16 @@ def main():
     cfg = config.load()
     theme.apply(cfg.get("theme", "light"))
 
-    app = QApplication(sys.argv)
+    class _App(QApplication):
+        """Custom QApplication that shows the window on macOS reopen (Dock click)."""
+        _main_window = None
+
+        def event(self, event):
+            if event.type() == event.Type.ApplicationActivate and self._main_window:
+                self._main_window._tray_show()
+            return super().event(event)
+
+    app = _App(sys.argv)
     app.setApplicationName("Summarizer")
 
     # Single-instance guard with QLocalServer
@@ -4095,6 +4104,7 @@ def main():
 
     window = MainWindow()
     window.show()
+    app._main_window = window
 
     # Handle "show" signals from new instances
     def _on_new_connection():
