@@ -1351,14 +1351,17 @@ class OllamaChatDialog(QDialog):
         self._thinking_timer.stop()
         if self._assistant_buf:
             self._messages.append({"role": "assistant", "content": self._assistant_buf})
-            # Re-render with markdown
-            cursor = self._chat_view.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            pos = cursor.position()
-            cursor.setPosition(self._thinking_anchor)
-            cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
-            cursor.insertHtml(_mrkdwn_to_display_html(self._assistant_buf))
+            try:
+                cursor = self._chat_view.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                pos = cursor.position()
+                anchor = min(self._thinking_anchor, pos)
+                cursor.setPosition(anchor)
+                cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+                cursor.insertHtml(_mrkdwn_to_display_html(self._assistant_buf))
+            except Exception:
+                pass
         self._worker = None
         self._set_busy(False)
 
@@ -1582,14 +1585,17 @@ class ContextChatDialog(QDialog):
         self._thinking_timer.stop()
         if self._assistant_buf:
             self._messages.append({"role": "assistant", "content": self._assistant_buf})
-            # Re-render the AI response with markdown
-            cursor = self._chat_view.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            pos = cursor.position()
-            cursor.setPosition(self._thinking_anchor)
-            cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
-            cursor.insertHtml(_mrkdwn_to_display_html(self._assistant_buf))
+            try:
+                cursor = self._chat_view.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                pos = cursor.position()
+                anchor = min(self._thinking_anchor, pos)
+                cursor.setPosition(anchor)
+                cursor.setPosition(pos, cursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+                cursor.insertHtml(_mrkdwn_to_display_html(self._assistant_buf))
+            except Exception:
+                pass
         self._append_text("<br>")
         self._worker = None
         self._set_busy(False)
