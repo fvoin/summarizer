@@ -152,7 +152,7 @@ def page_cover(c):
 
     c.setFont(F, 9)
     c.setFillColor(Color(1, 1, 1, 0.45))
-    c.drawCentredString(W / 2, H / 2 - 105, "v1.12")
+    c.drawCentredString(W / 2, H / 2 - 105, "v1.18.4")
 
 
 # ─── Installation ───────────────────────────────────────────────────
@@ -277,8 +277,16 @@ def page_what_is(c):
              "for 100% offline operation — nothing ever leaves your machine"),
         (bs, "<b>Instruction profiles</b> — create multiple prompt profiles and switch "
              "between them for different meeting types (standup, review, 1-on-1...)"),
-        (bs, "<b>Context</b> — accumulate meeting history for more accurate summaries "
+        (bs, "<b>Meeting series</b> — accumulate meeting history for more accurate summaries "
              "across recurring meetings"),
+        (bs, "<b>Meeting history</b> — SQLite database stores all transcripts, summaries, "
+             "and contexts with browsable history"),
+        (bs, "<b>Meeting series chat</b> — ask questions about your meeting history "
+             "using any configured LLM"),
+        (bs, "<b>Menu bar mode</b> — access recording controls from the macOS menu bar, "
+             "app hides from Dock"),
+        (bs, "<b>Recording Agent</b> — auto-record meetings from a web calendar backend"),
+        (bs, "<b>Theme support</b> — Light, Dark, and Nord color schemes"),
         (bs, "<b>Slack-ready</b> — Copy Summary pastes with bold/italic formatting "
              "that works directly in Slack"),
     ]
@@ -362,6 +370,14 @@ def page_main_window(c):
     c.setFont(FB, 12)
     c.drawString(ox + 14, ty, "Summarizer")
 
+    # History icon (clock)
+    hx, hy = ox + ww - 40, ty + 5
+    c.setFillColor(TEXT2)
+    c.circle(hx, hy, 7, fill=0, stroke=1)
+    c.setLineWidth(0.8)
+    c.line(hx, hy, hx, hy + 3)
+    c.line(hx, hy, hx + 2.5, hy)
+
     # Gear
     gx, gy = ox + ww - 22, ty + 5
     c.setFillColor(ACCENT)
@@ -369,31 +385,28 @@ def page_main_window(c):
     c.setFillColor(BG)
     c.circle(gx, gy, 3, fill=1, stroke=0)
 
-    # Context row
+    # Meeting series row
     ct = ty - 12
     c.setFillColor(TEXT2)
     c.setFont(F, 7)
-    c.drawString(ox + 14, ct, "Context:")
-    combo(c, ox + 52, ct - 4, 150, 14)
+    c.drawString(ox + 14, ct, "Meeting series:")
+    combo(c, ox + 72, ct - 4, 130, 14)
     c.setFillColor(PRIMARY)
     c.setFont(FB, 11)
     c.drawString(ox + 206, ct - 2, "+")
     c.setFillColor(HexColor("#b08800"))
     c.setFont(F, 12)
     c.drawString(ox + 222, ct - 2, "\u270f")
+    # Chat bubble icon
+    c.setFillColor(PRIMARY)
+    c.setFont(F, 10)
+    c.drawString(ox + 238, ct - 2, "\U0001f4ac")
     c.setFillColor(DANGER)
     c.setFont(FB, 11)
-    c.drawString(ox + 238, ct - 2, "\u00d7")
-
-    # General context field
-    gc_y = ct - 20
-    c.setFillColor(TEXT2)
-    c.setFont(F, 6.5)
-    c.drawString(ox + 14, gc_y, "General context")
-    field(c, ox + 14, gc_y - 20, ww - 36, 18, "Weekly sync, PM + Eng team...")
+    c.drawString(ox + 254, ct - 2, "\u00d7")
 
     # This meeting context field
-    mc_y = gc_y - 44
+    mc_y = ct - 20
     c.setFillColor(TEXT2)
     c.setFont(F, 6.5)
     c.drawString(ox + 14, mc_y, "This meeting context")
@@ -408,18 +421,11 @@ def page_main_window(c):
     ry -= rh
     dbtn(c, ox + 8, ry, ww - 16, rh, "Start Recording", PRIMARY, white, 10)
 
-    # File buttons
-    fby = ry - 28
-    c.setFillColor(PRIMARY)
-    c.setFont(F, 8)
-    c.drawString(ox + 30, fby + 6, "Summarize Audio File")
-    c.drawString(ox + 165, fby + 6, "Summarize Transcript")
-
     # Drop hint
-    dry = fby - 14
+    dry = ry - 14
     c.setFillColor(MUTED)
     c.setFont(F, 7)
-    c.drawCentredString(ox + ww / 2, dry, "or drag & drop audio / transcript files here")
+    c.drawCentredString(ox + ww / 2, dry, "drag & drop or click to open audio / text files")
 
     # Status
     sty = dry - 18
@@ -445,7 +451,8 @@ def page_main_window(c):
         ("  Pete \u2014 API review \u2014 next sprint", False),
         ("", False),
         ("\U0001f4ca Meeting Score", True),
-        ("  Efficiency: 7/10  Cost: ~300 EUR", False),
+        ("  7/10 \u2014 Decision 8, Time 6, Action 7", False),
+        ("  Email? No  Cost: ~300 EUR", False),
     ]
     ly = smy + smh - 12
     for text, bold in lines:
@@ -473,20 +480,24 @@ def page_main_window(c):
         c.drawString(ax + 6, ty - 12, desc)
         arr(c, ax, ty + 1, to_x, to_y, color=DANGER, w=1, hs=4)
 
-    ann("Settings", "LLM, Whisper, API keys",
-        gx - 8, gy, oy + wh - 40)
-    ann("Context", "General + per-meeting notes",
-        ox + ww - 8, cy + ch / 2, cy + ch / 2 + 6)
+    # Annotations — evenly spaced on the right
+    ann_top = oy + wh - 20
+    ann_gap = 36
+
+    ann("History + Settings", "Top bar icons",
+        hx - 8, hy, ann_top)
+    ann("Meeting series", "Per-series context + chat",
+        ox + ww - 8, ct, ann_top - ann_gap)
+    ann("Meeting context", "Per-session notes",
+        ox + ww - 8, mc_y - 10, ann_top - ann_gap * 2)
     ann("Record", "Click to start recording",
-        ox + ww - 8, ry + rh / 2, ry + rh / 2 + 6)
-    ann("Import Files", "Audio or transcript file",
-        ox + ww - 8, fby + 10, fby + 10)
-    ann("Status", "Color-coded state indicator",
-        ox + 48, sty + 4, sty + 4)
+        ox + ww - 8, ry + rh / 2, ann_top - ann_gap * 3)
+    ann("Drop zone", "Open or drag files here",
+        ox + ww - 8, dry + 4, ann_top - ann_gap * 4)
     ann("Result", "AI summary with formatting",
-        ox + ww - 8, smy + smh / 2, smy + smh / 2 + 6)
+        ox + ww - 8, smy + smh / 2, ann_top - ann_gap * 5)
     ann("Actions", "Copy to clipboard / open file",
-        ox + ww - 8, boty + 4, boty)
+        ox + ww - 8, boty + 4, ann_top - ann_gap * 6)
 
 
 # ─── Recording ──────────────────────────────────────────────────────
@@ -532,9 +543,21 @@ def page_recording(c):
         p.drawOn(c, 72, y - ph)
         y -= ph + 4
         if show_btns:
-            dbtn(c, 80, y - 24, 140, 24, "Start Recording", PRIMARY, white, 9)
+            rrect(c, 80, y - 24, 140, 24, r=6, stroke=PRIMARY, sw=1.2)
+            c.saveState()
+            c.setFillColor(PRIMARY)
+            c.setFont(FB, 9)
+            tw = c.stringWidth("Start Recording", FB, 9)
+            c.drawString(80 + (140 - tw) / 2, y - 17, "Start Recording")
+            c.restoreState()
             arr(c, 224, y - 12, 240, y - 12, color=TEXT2, w=1, hs=4)
-            dbtn(c, 244, y - 24, 140, 24, "Stop  1:23", DANGER, white, 9)
+            rrect(c, 244, y - 24, 140, 24, r=6, stroke=DANGER, sw=1.2)
+            c.saveState()
+            c.setFillColor(DANGER)
+            c.setFont(FB, 9)
+            tw = c.stringWidth("Stop  1:23", FB, 9)
+            c.drawString(244 + (140 - tw) / 2, y - 17, "Stop  1:23")
+            c.restoreState()
             y -= 32
         y -= 18
 
@@ -573,7 +596,7 @@ def _settings_frame(c, title, active_tab):
 
     # Tab bar
     tab_y = sy + sh - 24
-    tabs = ["Models", "Instructions", "General"]
+    tabs = ["General", "Models", "Instructions", "Recording Agent"]
     tw = sw / len(tabs)
     for i, label in enumerate(tabs):
         is_active = label == active_tab
@@ -808,7 +831,11 @@ def page_settings_instructions(c):
         "\u2022 Unresolved issues, blockers, follow-ups.",
         "",
         "\U0001f4ca *Meeting Score*",
-        "\u2022 *Efficiency*: X/10 \u2014 one-line reason",
+        "\u2022 *Decision output*: X/10",
+        "\u2022 *Time efficiency*: X/10",
+        "\u2022 *Actionability*: X/10",
+        "\u2022 *Final*: avg of 3 \u2014 X/10",
+        "\u2022 *Could this have been an email?* Yes/No",
         "\u2022 *Cost estimate*: [duration]h \u00d7 [N] \u00d7 50 EUR = ~X EUR",
         "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500",
         "FORMATTING: \u2022 only, *bold*, _italic_, no # markdown",
@@ -893,7 +920,7 @@ def page_settings_general(c):
     c.drawString(sx + 14, ry, "Version:")
     c.setFillColor(TEXT)
     c.setFont(FB, 8.5)
-    c.drawString(sx + 70, ry, "v1.12")
+    c.drawString(sx + 70, ry, "v1.18.4")
     dbtn(c, sx + sw - 145, ry - 5, 130, 18, "Check for Updates", PRIMARY, white, 8)
     ry -= 28
 
@@ -909,72 +936,168 @@ def page_settings_general(c):
 def page_context(c):
     c.setFont(FB, 22)
     c.setFillColor(PRIMARY)
-    c.drawString(40, H - 60, "Working with Context")
+    c.drawString(40, H - 60, "Meeting Series")
 
     bs = ParagraphStyle("b", fontName=F, fontSize=10.5, leading=15, textColor=TEXT, spaceAfter=6)
     hs = ParagraphStyle("h", fontName=FB, fontSize=12, leading=16, textColor=PRIMARY,
                         spaceBefore=14, spaceAfter=4)
 
     content = [
-        (hs, "What is Context?"),
-        (bs, "Context lets Summarizer take previous meetings into account when "
-             "generating summaries. This is useful for recurring meetings (standups, "
-             "1-on-1s) where tracking progress and action items matters."),
-        (hs, "Named Context"),
-        (bs, "Create a named context with the <b>+</b> button. "
-             "Edit the raw file with <b>\u270f</b>. "
-             "Delete with <b>\u00d7</b>. "
-             "Each context has two parts: General context and History."),
-        (hs, "General Context"),
-        (bs, "Persistent info about this meeting series — type, goals, usual "
-             "participants, key terms. Shown when a named context is selected. "
-             "Always included in full in the LLM prompt. "
-             "Saved automatically when you switch contexts or generate a summary."),
+        (hs, "What is a Meeting Series?"),
+        (bs, "A meeting series groups recurring meetings (standups, 1-on-1s, reviews) "
+             "so Summarizer can track progress and action items across sessions. "
+             "All data is stored in a local SQLite database."),
+        (hs, "Creating a Series"),
+        (bs, "Click <b>+</b> next to the Meeting series dropdown and enter a name. "
+             "Use <b>\u270f</b> to open the series editor, "
+             "<b>\U0001f4ac</b> to chat about the series, "
+             "and <b>\u00d7</b> to delete it."),
+        (hs, "Persistent Context"),
+        (bs, "Each series has a persistent context — participants, goals, key terms. "
+             "Edit it via the <b>\u270f</b> series editor. "
+             "This is always included in the LLM prompt for accurate summaries."),
         (hs, "This Meeting Context"),
         (bs, "Per-session details — today's agenda, attendees, specific topics. "
-             "Always included in the prompt. Stays after summarization so you can "
-             "review it. Saved to the context history alongside the summary."),
+             "Always included in the prompt. Saved alongside the transcript and "
+             "summary in the database."),
         (hs, "History & Budget"),
-        (bs, "Each summary is prepended to the History section (newest first). "
+        (bs, "Each meeting's summary (with its meeting context) is stored in the database. "
              "The Context Limit (default 5000 chars) controls how much history "
-             "is loaded — General + Meeting context are always included in full, "
-             "remaining budget is filled with history entries."),
+             "is loaded into the prompt — persistent context and current meeting context "
+             "are always included in full, remaining budget is filled with recent summaries."),
+        (hs, "Series Chat"),
+        (bs, "Click <b>\U0001f4ac</b> to chat with an AI about the series. "
+             "The model sees the persistent context and all recent meeting summaries. "
+             "Ask questions like 'what did we decide about X?' or 'what are the open action items?'"),
     ]
 
-    fr = Frame(40, 240, W - 80, H - 120 - 240, showBoundary=0)
+    fr = Frame(40, 200, W - 80, H - 120 - 200, showBoundary=0)
     fr.addFromList([Paragraph(t, s) for s, t in content], c)
 
-    # File format diagram
-    fy = 210
+    # Database diagram
+    fy = 170
     c.setFont(FB, 11)
     c.setFillColor(PRIMARY)
-    c.drawCentredString(W / 2, fy, "Context File Format")
+    c.drawCentredString(W / 2, fy, "Data Storage")
 
-    rrect(c, 60, fy - 130, W - 120, 120, r=6, fill=Color(0, 0, 0, 0.04))
+    rrect(c, 60, fy - 110, W - 120, 100, r=6, fill=Color(0, 0, 0, 0.04))
     c.setFont(FB, 8)
     c.setFillColor(PRIMARY)
-    c.drawString(75, fy - 16, "=== GENERAL ===")
+    c.drawString(75, fy - 16, "SQLite database: ~/.summarizer/summarizer.db")
     c.setFont(F, 8.5)
     c.setFillColor(TEXT2)
-    c.drawString(75, fy - 30, "Weekly product sync. PM + Eng team. Goal: sprint review.")
-    c.setFont(FB, 8)
-    c.setFillColor(PRIMARY)
-    c.drawString(75, fy - 50, "=== HISTORY ===")
-    c.setFont(F, 8.5)
-    c.setFillColor(TEXT2)
-    c.drawString(75, fy - 64, "[2026-03-15 10:00]")
-    c.drawString(75, fy - 78, "Meeting context: Sprint review, demo prep")
-    c.drawString(75, fy - 92, "Summary: Discussed RFC-42 timeline. Dashboard approved...")
-    c.drawString(75, fy - 110, "[2026-03-08 10:00]  ...")
+    c.drawString(75, fy - 34, "contexts table — series name, persistent context")
+    c.drawString(75, fy - 48, "meetings table — transcript, summary, meeting context,")
+    c.drawString(75, fy - 62, "                  duration, date, linked to series")
+    c.setFont(F, 8)
+    c.setFillColor(MUTED)
+    c.drawString(75, fy - 82, "Existing _context.txt files are auto-migrated on first run.")
+    c.drawString(75, fy - 96, "Browse all data via the History dialog (\U0001f553 icon in top bar).")
 
-    # File structure
-    rrect(c, 60, 50, W - 120, 48, r=6, fill=Color(0, 0, 0, 0.04))
+
+# ─── Menu Bar ──────────────────────────────────────────────────
+
+def page_menu_bar(c):
+    c.setFont(FB, 22)
+    c.setFillColor(PRIMARY)
+    c.drawString(40, H - 60, "Menu Bar & Recording Agent")
+
+    bs = ParagraphStyle("b", fontName=F, fontSize=10.5, leading=15, textColor=TEXT, spaceAfter=6)
+    hs = ParagraphStyle("h", fontName=FB, fontSize=12, leading=16, textColor=PRIMARY,
+                        spaceBefore=14, spaceAfter=4)
+
+    content = [
+        (hs, "Menu Bar Icon"),
+        (bs, "Summarizer places an icon in the macOS menu bar. Clicking it reveals a compact "
+             "menu with <b>Start/Stop Recording</b>, <b>Show Summarizer</b>, "
+             "<b>Settings</b>, and <b>Quit</b>."),
+        (hs, "Hide from Dock"),
+        (bs, "When minimized to the menu bar tray, the app hides from the Dock. "
+             "Click the menu bar icon and choose <b>Show Summarizer</b> to bring it back."),
+        (hs, "Single Instance"),
+        (bs, "Launching Summarizer again while it is already running does not open a "
+             "second copy. Instead, the existing window is brought to the front."),
+        (hs, "Recording Agent"),
+        (bs, "The Recording Agent automatically starts recording when an upcoming meeting "
+             "is detected from a web calendar backend. Configure the backend URL and "
+             "behavior in <b>Settings \u2192 Recording Agent</b>."),
+        (bs, "When a meeting is about to start, the agent activates recording and stops "
+             "when the meeting ends. The transcript and summary are generated automatically, "
+             "just like a manual recording session."),
+    ]
+
+    fr = Frame(40, 220, W - 80, H - 120 - 220, showBoundary=0)
+    fr.addFromList([Paragraph(t, s) for s, t in content], c)
+
+    # Menu mockup
+    mx = 160
+    my = 100
+    mw = 180
+    mh = 90
+    rrect(c, mx, my, mw, mh, r=6, fill=white, stroke=BORDER, sw=0.8)
+
+    items = [
+        ("Start Recording", PRIMARY),
+        ("Show Summarizer", TEXT),
+        ("Settings", TEXT),
+        ("Quit", DANGER),
+    ]
+    iy = my + mh - 16
+    for label, color in items:
+        c.setFillColor(color)
+        c.setFont(F, 9)
+        c.drawString(mx + 12, iy, label)
+        iy -= 18
+
+    # Label
+    c.setFillColor(TEXT2)
+    c.setFont(F, 9)
+    c.drawCentredString(mx + mw / 2, my - 14, "Menu bar dropdown")
+
+
+# ─── History ───────────────────────────────────────────────────
+
+def page_history(c):
+    c.setFont(FB, 22)
+    c.setFillColor(PRIMARY)
+    c.drawString(40, H - 60, "Meeting History & Series")
+
+    bs = ParagraphStyle("b", fontName=F, fontSize=10.5, leading=15, textColor=TEXT, spaceAfter=6)
+    hs = ParagraphStyle("h", fontName=FB, fontSize=12, leading=16, textColor=PRIMARY,
+                        spaceBefore=14, spaceAfter=4)
+
+    content = [
+        (hs, "Meeting History"),
+        (bs, "Click the <b>clock icon</b> in the top bar to open the Meeting History dialog. "
+             "It shows a searchable, scrollable list of all past meetings with their date, "
+             "series, transcript, and summary. All data is stored in a local SQLite database."),
+        (hs, "Meeting Series Editor"),
+        (bs, "Click the <b>edit button</b> (\u270f) next to the series dropdown to open the "
+             "series editor. Here you can rename series, update general context, review "
+             "accumulated history, and delete series you no longer need."),
+        (hs, "Series Chat"),
+        (bs, "Click the <b>chat icon</b> (\U0001f4ac) next to the series dropdown to open a "
+             "chat window scoped to that meeting series. Ask questions about past meetings, "
+             "action items, decisions, or trends \u2014 the LLM has access to the full series "
+             "history stored in the database."),
+        (hs, "SQLite Storage"),
+        (bs, "All transcripts, summaries, meeting contexts, and series data are stored in a "
+             "local SQLite database at <b>~/.summarizer/summarizer.db</b>. This replaces the "
+             "older plain-text context files and provides faster search, reliable history, "
+             "and structured queries for the series chat feature."),
+    ]
+
+    fr = Frame(40, 120, W - 80, H - 120 - 120, showBoundary=0)
+    fr.addFromList([Paragraph(t, s) for s, t in content], c)
+
+    # DB structure hint
+    rrect(c, 60, 50, W - 120, 55, r=6, fill=Color(0, 0, 0, 0.04))
     c.setFillColor(TEXT2)
     c.setFont(FB, 9)
-    c.drawString(75, 82, "~/.summarizer/")
+    c.drawString(75, 88, "~/.summarizer/")
     c.setFont(F, 9)
-    c.drawString(90, 68, "recordings/standup_context.txt    — standup context")
-    c.drawString(90, 55, "recordings/client_x_context.txt   — client X context")
+    c.drawString(90, 74, "summarizer.db     \u2014 SQLite database (meetings, series, contexts)")
+    c.drawString(90, 60, "recordings/       \u2014 audio files (if Save Audio is enabled)")
 
 
 # ─── FAQ ────────────────────────────────────────────────────────────
@@ -1034,7 +1157,8 @@ def main():
     c.setAuthor("Summarizer")
 
     for fn in [page_cover, page_install, page_what_is, page_main_window,
-               page_recording, page_settings_models, page_settings_instructions,
+               page_recording, page_menu_bar, page_history,
+               page_settings_models, page_settings_instructions,
                page_settings_general, page_context, page_faq]:
         fn(c)
         c.showPage()
