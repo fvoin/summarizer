@@ -2280,48 +2280,7 @@ class SettingsDialog(QDialog):
         general_form.setContentsMargins(12, 12, 12, 12)
         general_form.setSpacing(8)
 
-        self.context_limit_spin = QSpinBox()
-        self.context_limit_spin.setRange(500, 50000)
-        self.context_limit_spin.setSingleStep(500)
-        self.context_limit_spin.setValue(int(self.cfg.get("context_limit", 5000)))
-        self.context_limit_spin.setSuffix(" chars")
-        general_form.addRow(t("context_limit_label"), self.context_limit_spin)
-
-        self.silence_spin = QSpinBox()
-        self.silence_spin.setRange(5, 300)
-        self.silence_spin.setValue(int(self.cfg.get("silence_timeout", 30)))
-        self.silence_spin.setSuffix(" sec")
-        general_form.addRow(t("silence_timeout_label"), self.silence_spin)
-
-        self.device_combo = theme.FlatComboBox()
-        self.device_combo.addItem(t("device_default"), None)
-        for dev in AudioRecorder.list_devices():
-            self.device_combo.addItem(dev["name"], dev["id"])
-        saved_dev = self.cfg.get("input_device")
-        if saved_dev is not None:
-            for i in range(self.device_combo.count()):
-                if self.device_combo.itemData(i) == saved_dev:
-                    self.device_combo.setCurrentIndex(i)
-                    break
-        general_form.addRow(t("input_device_label"), self.device_combo)
-
-        self.save_audio_check = QCheckBox(t("save_audio_check"))
-        self.save_audio_check.setChecked(bool(self.cfg.get("save_audio", False)))
-        general_form.addRow(t("save_audio_label"), self.save_audio_check)
-
-        self.transcribe_only_check = QCheckBox(t("transcribe_only_check"))
-        self.transcribe_only_check.setChecked(bool(self.cfg.get("transcribe_only", False)))
-        general_form.addRow(t("mode_label"), self.transcribe_only_check)
-
-        self.sound_on_done_check = QCheckBox(t("sound_check"))
-        self.sound_on_done_check.setChecked(bool(self.cfg.get("sound_on_done", True)))
-        general_form.addRow(t("sound_label"), self.sound_on_done_check)
-
-        self.recordings_edit = QLineEdit(self.cfg.get("recordings_dir", ""))
-        self.recordings_edit.setPlaceholderText(t("recordings_dir_placeholder"))
-        general_form.addRow(t("recordings_dir_label"), self.recordings_edit)
-
-        # ── Theme selector ───────────────────────────────────────────────
+        # Theme selector
         self.theme_combo = theme.FlatComboBox()
         _theme_keys = theme.THEME_NAMES
         _theme_labels = {"light": t("theme_light"), "dark": t("theme_dark"), "nord": t("theme_nord")}
@@ -2339,6 +2298,14 @@ class SettingsDialog(QDialog):
         theme_widget = QWidget()
         theme_widget.setLayout(theme_layout)
         general_form.addRow(t("theme_label"), theme_widget)
+
+        self.menubar_check = QCheckBox(t("menubar_check"))
+        self.menubar_check.setChecked(bool(self.cfg.get("menubar_enabled", False)))
+        general_form.addRow(t("menubar_label"), self.menubar_check)
+
+        self.sound_on_done_check = QCheckBox(t("sound_check"))
+        self.sound_on_done_check.setChecked(bool(self.cfg.get("sound_on_done", True)))
+        general_form.addRow(t("sound_label"), self.sound_on_done_check)
 
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(8)
@@ -2363,18 +2330,52 @@ class SettingsDialog(QDialog):
         tabs.addTab(models_scroll, t("tab_models"))
         tabs.addTab(instr_tab, t("tab_instructions"))
 
-        # ── TAB: Agent ────────────────────────────────────────────────────
-        agent_tab = QWidget()
-        agent_form = QFormLayout(agent_tab)
-        agent_form.setSpacing(10)
-        agent_form.setContentsMargins(12, 12, 12, 12)
+        # ── TAB: Advanced ─────────────────────────────────────────────────
+        adv_tab = QWidget()
+        adv_form = QFormLayout(adv_tab)
+        adv_form.setSpacing(8)
+        adv_form.setContentsMargins(12, 12, 12, 12)
 
-        self.menubar_check = QCheckBox(t("menubar_check"))
-        self.menubar_check.setChecked(bool(self.cfg.get("menubar_enabled", False)))
-        agent_form.addRow(t("menubar_label"), self.menubar_check)
+        self.context_limit_spin = QSpinBox()
+        self.context_limit_spin.setRange(500, 50000)
+        self.context_limit_spin.setSingleStep(500)
+        self.context_limit_spin.setValue(int(self.cfg.get("context_limit", 5000)))
+        self.context_limit_spin.setSuffix(" chars")
+        adv_form.addRow(t("context_limit_label"), self.context_limit_spin)
 
-        agent_form.addRow(QLabel(""))  # spacer
+        self.silence_spin = QSpinBox()
+        self.silence_spin.setRange(5, 300)
+        self.silence_spin.setValue(int(self.cfg.get("silence_timeout", 30)))
+        self.silence_spin.setSuffix(" sec")
+        adv_form.addRow(t("silence_timeout_label"), self.silence_spin)
 
+        self.device_combo = theme.FlatComboBox()
+        self.device_combo.addItem(t("device_default"), None)
+        for dev in AudioRecorder.list_devices():
+            self.device_combo.addItem(dev["name"], dev["id"])
+        saved_dev = self.cfg.get("input_device")
+        if saved_dev is not None:
+            for i in range(self.device_combo.count()):
+                if self.device_combo.itemData(i) == saved_dev:
+                    self.device_combo.setCurrentIndex(i)
+                    break
+        adv_form.addRow(t("input_device_label"), self.device_combo)
+
+        self.save_audio_check = QCheckBox(t("save_audio_check"))
+        self.save_audio_check.setChecked(bool(self.cfg.get("save_audio", False)))
+        adv_form.addRow(t("save_audio_label"), self.save_audio_check)
+
+        self.transcribe_only_check = QCheckBox(t("transcribe_only_check"))
+        self.transcribe_only_check.setChecked(bool(self.cfg.get("transcribe_only", False)))
+        adv_form.addRow(t("mode_label"), self.transcribe_only_check)
+
+        self.recordings_edit = QLineEdit(self.cfg.get("recordings_dir", ""))
+        self.recordings_edit.setPlaceholderText(t("recordings_dir_placeholder"))
+        adv_form.addRow(t("recordings_dir_label"), self.recordings_edit)
+
+        adv_form.addRow(QLabel(""))  # spacer
+
+        # Recording Agent group
         agent_group = QGroupBox(t("agent_group"))
         agent_vlay = QVBoxLayout(agent_group)
         agent_inner = QFormLayout()
@@ -2405,9 +2406,9 @@ class SettingsDialog(QDialog):
         test_row.addWidget(self._agent_test_status, 1)
         agent_vlay.addLayout(test_row)
 
-        agent_form.addRow(agent_group)
+        adv_form.addRow(agent_group)
 
-        tabs.addTab(agent_tab, t("agent_group"))
+        tabs.addTab(adv_tab, t("tab_advanced"))
 
         # ── Save / Cancel row ─────────────────────────────────────────────
         btn_row = QHBoxLayout()

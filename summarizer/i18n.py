@@ -93,6 +93,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "tab_models":               {"en": "Models",                              "ru": "Модели"},
     "tab_instructions":         {"en": "Instructions",                        "ru": "Инструкции"},
     "tab_general":              {"en": "General",                             "ru": "Общие"},
+    "tab_advanced":             {"en": "Advanced",                            "ru": "Расширенные"},
     "ai_model_group":           {"en": "AI Model",                            "ru": "Модель ИИ"},
     "cloud_label":              {"en": "☁  Cloud",                            "ru": "☁  Облачные"},
     "custom_label":             {"en": "Custom:",                             "ru": "Другая:"},
