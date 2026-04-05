@@ -2065,7 +2065,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("settings_title"))
         self.setMinimumWidth(580)
-        self.setMinimumHeight(720)
+        self.setMinimumHeight(820)
         self.cfg = config.load()
         # Workers are stored on MainWindow and survive dialog close
         self._download_workers: dict[str, ModelDownloadWorker] = bg_whisper if bg_whisper is not None else {}
@@ -2126,6 +2126,8 @@ class SettingsDialog(QDialog):
         models_scroll = QScrollArea()
         models_scroll.setWidgetResizable(True)
         models_scroll.setFrameShape(models_scroll.Shape.NoFrame)
+        models_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        models_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         models_inner = QWidget()
         models_vlay = QVBoxLayout(models_inner)
         models_vlay.setContentsMargins(8, 8, 8, 8)
@@ -2307,24 +2309,20 @@ class SettingsDialog(QDialog):
         self.sound_on_done_check.setChecked(bool(self.cfg.get("sound_on_done", True)))
         general_form.addRow(t("sound_label"), self.sound_on_done_check)
 
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
-        logs_btn = QPushButton(t("open_log"))
-        logs_btn.setToolTip(str(config.get_log_path()))
-        logs_btn.clicked.connect(self._open_logs)
-        bottom_row.addWidget(logs_btn)
+        update_row = QHBoxLayout()
+        update_row.setSpacing(8)
         self._update_btn = QPushButton(t("check_updates"))
         self._update_btn.clicked.connect(self._check_for_updates)
-        bottom_row.addWidget(self._update_btn)
+        update_row.addWidget(self._update_btn)
         self._update_progress = QProgressBar()
         self._update_progress.setMaximumHeight(18)
         self._update_progress.setVisible(False)
-        bottom_row.addWidget(self._update_progress)
-        bottom_row.addStretch()
+        update_row.addWidget(self._update_progress)
+        update_row.addStretch()
         version_label = QLabel(f"v{config.APP_VERSION}")
         version_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
-        bottom_row.addWidget(version_label)
-        general_form.addRow("", bottom_row)
+        update_row.addWidget(version_label)
+        general_form.addRow("", update_row)
 
         tabs.addTab(general_tab, t("tab_general"))
         tabs.addTab(models_scroll, t("tab_models"))
@@ -2372,6 +2370,11 @@ class SettingsDialog(QDialog):
         self.recordings_edit = QLineEdit(self.cfg.get("recordings_dir", ""))
         self.recordings_edit.setPlaceholderText(t("recordings_dir_placeholder"))
         adv_form.addRow(t("recordings_dir_label"), self.recordings_edit)
+
+        logs_btn = QPushButton(t("open_log"))
+        logs_btn.setToolTip(str(config.get_log_path()))
+        logs_btn.clicked.connect(self._open_logs)
+        adv_form.addRow(t("diagnostics_label"), logs_btn)
 
         adv_form.addRow(QLabel(""))  # spacer
 

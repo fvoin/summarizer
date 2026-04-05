@@ -6,7 +6,7 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.18.4"
+APP_VERSION = "1.19.0"
 
 _CONFIG_DIR = Path.home() / ".summarizer"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
@@ -357,11 +357,17 @@ LOCAL_LLM_MODELS = {
         "quality": "Good",
         "ollama_name": "glm4:9b",
     },
-    "gemma3:12b-it-qat": {
-        "display": "Gemma 3 12B QAT",
-        "size_gb": 8.9,
+    "gemma4:e4b": {
+        "display": "Gemma 4 E4B",
+        "size_gb": 9.6,
         "quality": "Better",
-        "ollama_name": "gemma3:12b-it-qat",
+        "ollama_name": "gemma4:e4b",
+    },
+    "gemma4:26b": {
+        "display": "Gemma 4 26B MoE",
+        "size_gb": 18.0,
+        "quality": "Great (24+ GB RAM)",
+        "ollama_name": "gemma4:26b",
     },
     "qwen3:30b": {
         "display": "Qwen 3 30B",
