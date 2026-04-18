@@ -1306,7 +1306,7 @@ class OllamaChatDialog(QDialog):
         sb.setValue(sb.maximum())
 
     def _send(self):
-        text = self._input.toPlainText().strip()
+        text = self._input.text().strip()
         if not text or self._worker is not None:
             return
         self._input.clear()
