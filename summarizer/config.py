@@ -6,7 +6,7 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.19.1"
+APP_VERSION = "1.19.2"
 
 _CONFIG_DIR = Path.home() / ".summarizer"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
@@ -342,7 +342,7 @@ def delete_whisper_model(model_name: str):
 
 CLOUD_LLM_PRESETS = [
     ("gemini-3-flash-preview",   "Gemini 3 Flash Preview"),
-    ("gemini-2.5-pro",           "Gemini 2.5 Pro"),
+    ("gemini-3.1-pro-preview",    "Gemini 3.1 Pro Preview"),
     ("gpt-5-mini",               "GPT-5 mini"),
     ("gpt-5.4",                  "GPT-5.4"),
 ]
@@ -369,11 +369,11 @@ LOCAL_LLM_MODELS = {
         "quality": "Great (24+ GB RAM)",
         "ollama_name": "gemma4:26b",
     },
-    "qwen3:30b": {
-        "display": "Qwen 3 30B",
+    "qwen3.6:30b": {
+        "display": "Qwen 3.6 30B",
         "size_gb": 19.0,
         "quality": "Great (24+ GB RAM)",
-        "ollama_name": "qwen3:30b",
+        "ollama_name": "qwen3.6:30b",
     },
     "gpt-oss:20b": {
         "display": "GPT-OSS 20B",
