@@ -37,6 +37,7 @@ class AudioRecorder:
         self._silence_threshold = silence_timeout
         self._sound_time_lock = threading.Lock()
         self._rms_threshold = 0.01
+        self._noise_floor = 0.0
         self._calibrating = True
         self._calibration_samples: list = []
         self._calibration_end: float = 0.0
@@ -67,9 +68,9 @@ class AudioRecorder:
     # ── silence detection ────────────────────────────────────────────────
 
     _CALIBRATION_SECS = 3.0
-    _CALIBRATION_FACTOR = 4.0
+    _CALIBRATION_FACTOR = 6.0
     _MIN_THRESHOLD = 0.005
-    _MAX_NOISE_FLOOR = 0.02   # cap so speech during calibration doesn't inflate threshold
+    _NOISE_ADAPT_ALPHA = 0.005  # how fast noise floor tracks ambient changes
 
     def _detect_silence(self, audio_data: np.ndarray) -> bool:
         if len(audio_data) == 0:
@@ -82,20 +83,25 @@ class AudioRecorder:
         if self._calibrating:
             self._calibration_samples.append(rms)
             if now >= self._calibration_end:
-                raw_floor = float(np.median(self._calibration_samples)) if self._calibration_samples else 0.0
-                noise_floor = min(raw_floor, self._MAX_NOISE_FLOOR)
-                self._rms_threshold = max(noise_floor * self._CALIBRATION_FACTOR, self._MIN_THRESHOLD)
+                # Use 10th percentile to capture true quiet frames, ignoring speech bursts
+                raw_floor = float(np.percentile(self._calibration_samples, 10)) if self._calibration_samples else 0.0
+                self._noise_floor = raw_floor
+                self._rms_threshold = max(raw_floor * self._CALIBRATION_FACTOR, self._MIN_THRESHOLD)
                 self._calibrating = False
-                # Reset timer so silence window starts fresh after calibration
                 with self._sound_time_lock:
                     self._last_sound_time = now
-                _log(f"Silence calibration done: raw_floor={raw_floor:.5f}, "
-                     f"capped_floor={noise_floor:.5f}, threshold={self._rms_threshold:.5f} "
+                _log(f"Silence calibration done: noise_floor={raw_floor:.5f}, "
+                     f"threshold={self._rms_threshold:.5f} "
                      f"({len(self._calibration_samples)} samples)")
             return False
 
+        # Continuously adapt noise floor on quiet frames so threshold tracks ambient changes
+        if rms < self._rms_threshold:
+            self._noise_floor = (1 - self._NOISE_ADAPT_ALPHA) * self._noise_floor + self._NOISE_ADAPT_ALPHA * rms
+            self._rms_threshold = max(self._noise_floor * self._CALIBRATION_FACTOR, self._MIN_THRESHOLD)
+
         if now - self._last_rms_log_time >= 10.0:
-            _log(f"RMS: current={rms:.5f}, peak={self._peak_rms:.5f}, threshold={self._rms_threshold:.5f}")
+            _log(f"RMS: current={rms:.5f}, peak={self._peak_rms:.5f}, threshold={self._rms_threshold:.5f}, noise_floor={self._noise_floor:.5f}")
             self._last_rms_log_time = now
             self._peak_rms = 0.0
 
