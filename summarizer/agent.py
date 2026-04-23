@@ -148,6 +148,7 @@ def post_complete(transcript: str, meeting: dict) -> dict:
     payload = json.dumps({
         "transcript": transcript,
         "meetingId": meeting.get("id") or meeting.get("calendarEventId", ""),
+        "calendarEventId": meeting.get("calendarEventId", ""),
         "title": meeting.get("title", ""),
         "participants": meeting.get("participants", []),
         "agenda": meeting.get("agenda", ""),
