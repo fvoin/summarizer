@@ -38,8 +38,8 @@ pip install -r requirements.txt -q
 X86_PKGS=(
     "ctranslate2==4.6.0"
     "numpy"
-    "PyQt6"
-    "PyQt6-Qt6"
+    "PyQt6==6.10.2"
+    "PyQt6-Qt6==6.10.2"
     "PyQt6-sip"
 )
 for pkg in "${X86_PKGS[@]}"; do
