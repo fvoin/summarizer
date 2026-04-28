@@ -2818,6 +2818,11 @@ class SettingsDialog(QDialog):
             )
             with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
                 data = json.loads(resp.read().decode())
+            if isinstance(data, dict):
+                for key in ("meetings", "data", "items", "results"):
+                    if key in data and isinstance(data[key], list):
+                        data = data[key]
+                        break
             count = len(data) if isinstance(data, list) else 0
             self._agent_test_status.setText(t("agent_test_ok", count=count))
             self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['success']};")
