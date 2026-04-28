@@ -3617,6 +3617,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        self._persist_meeting_record(transcript, duration)
+
         # If this was an agent-triggered recording, upload transcript
         _logger.info("RT path: _agent_meeting=%s", "SET" if self._agent_meeting else "None")
         if self._agent_meeting:
@@ -3818,6 +3820,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        self._persist_meeting_record(transcript, getattr(self, "_pending_duration", None))
+
         # If this was an agent-triggered recording, upload transcript
         _logger.info("Transcription done, _agent_meeting=%s", "SET" if self._agent_meeting else "None")
         if self._agent_meeting:
@@ -3852,6 +3856,7 @@ class MainWindow(QMainWindow):
 
         self._current_transcript = text
         self._current_transcript_path = file_path
+        self._persist_meeting_record(text, None)
         if self._is_transcribe_only():
             self._finish_with_transcript(text)
         else:
@@ -3881,24 +3886,57 @@ class MainWindow(QMainWindow):
         if config.load().get("sound_on_done", True):
             self._play_done_sound()
 
+    def _persist_meeting_record(self, transcript: str, duration_seconds: Optional[int]) -> None:
+        """Insert a meeting row in the DB and remember its id in self._last_meeting_id.
+
+        Runs as soon as transcription completes so the meeting shows up in the
+        History dialog even if summarization is skipped (transcribe-only mode)
+        or fails. The row is later updated with the summary in _on_summary_done.
+        """
+        self._last_meeting_id = None
+        if not transcript or not transcript.strip():
+            return
+        try:
+            from . import db
+            ctx_name, _, meeting_ctx, profile = self._get_context()
+            if ctx_name and not db.get_context_id(ctx_name):
+                db.create_context(ctx_name)
+            self._last_meeting_id = db.save_meeting(
+                context_name=ctx_name,
+                title=ctx_name or "Meeting",
+                started_at=getattr(self, "_recording_wall_time", None),
+                duration_seconds=duration_seconds or 0,
+                meeting_context=(meeting_ctx or "").strip(),
+                transcript=transcript,
+                summary="",
+                profile_name=profile or "",
+            )
+        except Exception as e:
+            _logger.warning("Failed to insert meeting row: %s", e)
+
     def _on_summary_done(self, summary: str):
         self._set_busy(False)
         self._saved_summary = summary
         self._summary_context_name = self.context_combo.currentData() or None
-        self._last_meeting_id = None
         self.result_text.setPlainText(summary)
         self.copy_btn.setEnabled(True)
         self.transcript_btn.setEnabled(bool(self._current_transcript_path))
         self.update_ctx_btn.setVisible(False)
         self._set_status(t("status_done"), "done")
         self._refresh_contexts()
-        # Save context-less meetings to db
-        if not self._summary_context_name:
-            try:
-                from . import db
+        # Update the meeting row created at transcription time with the summary.
+        # Fallback: if the row never got inserted (e.g. earlier failure), insert now.
+        try:
+            from . import db
+            if self._last_meeting_id:
+                conn = db.get_connection()
+                conn.execute("UPDATE meetings SET summary = ? WHERE id = ?",
+                             (summary, self._last_meeting_id))
+                conn.commit()
+            else:
                 self._last_meeting_id = db.save_meeting(
-                    context_name=None,
-                    title="Meeting",
+                    context_name=self._summary_context_name,
+                    title=self._summary_context_name or "Meeting",
                     started_at=getattr(self, "_recording_wall_time", None),
                     duration_seconds=getattr(self, "_pending_duration", 0) or 0,
                     meeting_context=self.meeting_ctx.toPlainText().strip(),
@@ -3906,8 +3944,8 @@ class MainWindow(QMainWindow):
                     summary=summary,
                     profile_name=self.profile_select.currentData() or "",
                 )
-            except Exception as e:
-                _logger.warning("Failed to save meeting to db: %s", e)
+        except Exception as e:
+            _logger.warning("Failed to save meeting summary to db: %s", e)
         if config.load().get("sound_on_done", True):
             self._play_done_sound()
 

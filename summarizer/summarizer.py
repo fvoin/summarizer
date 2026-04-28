@@ -307,14 +307,4 @@ def summarize(
     prompt = build_prompt(transcript, prior, duration_seconds=duration_seconds)
     raw = call_llm(prompt, profile_name=profile_name)
     summary = format_summary(raw)
-
-    if context_name:
-        try:
-            save_to_context(context_name, summary, general_text=general_text,
-                            meeting_text=meeting_text, transcript=transcript,
-                            duration_seconds=duration_seconds or 0,
-                            profile_name=profile_name)
-        except Exception as e:
-            _log(f"Failed to save context: {e}")
-
     return summary
