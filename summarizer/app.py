@@ -3216,6 +3216,8 @@ class MainWindow(QMainWindow):
         _logger.info("Agent: auto-recording '%s'", title)
         self._tray.showMessage("Summarizer", t("agent_notify_recording", title=title))
         self._toggle_recording()
+        if self._recorder and self._recorder.is_recording():
+            self._set_status(t("status_recording_agent", title=title), "recording")
 
     def _on_agent_error(self, msg: str):
         _logger.error("Agent error: %s", msg)
@@ -3621,11 +3623,12 @@ class MainWindow(QMainWindow):
 
         # If this was an agent-triggered recording, upload transcript
         _logger.info("RT path: _agent_meeting=%s", "SET" if self._agent_meeting else "None")
+        was_agent = self._agent_meeting is not None
         if self._agent_meeting:
             self._agent_meeting["_duration"] = duration or 0
             self._agent_upload_transcript(transcript)
 
-        if self._is_transcribe_only():
+        if self._is_transcribe_only() or was_agent:
             self._finish_with_transcript(transcript)
         else:
             self._set_busy(True)
@@ -3824,11 +3827,12 @@ class MainWindow(QMainWindow):
 
         # If this was an agent-triggered recording, upload transcript
         _logger.info("Transcription done, _agent_meeting=%s", "SET" if self._agent_meeting else "None")
+        was_agent = self._agent_meeting is not None
         if self._agent_meeting:
             self._agent_meeting["_duration"] = getattr(self, "_pending_duration", 0) or 0
             self._agent_upload_transcript(transcript)
 
-        if self._is_transcribe_only():
+        if self._is_transcribe_only() or was_agent:
             self._finish_with_transcript(transcript)
         else:
             self._run_summarize(transcript, duration_seconds=getattr(self, "_pending_duration", None))

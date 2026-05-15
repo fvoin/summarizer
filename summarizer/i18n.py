@@ -49,6 +49,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
 
     # ── Status messages ──────────────────────────────────────────────────
     "status_recording":         {"en": "Recording…",                          "ru": "Запись…"},
+    "status_recording_agent":   {"en": "Recording (web): {title}",            "ru": "Запись (веб): {title}"},
     "status_transcribing":      {"en": "Transcribing…",                       "ru": "Транскрибирование…"},
     "status_summarizing":       {"en": "Summarizing…",                        "ru": "Суммирование…"},
     "status_done":              {"en": "Done",                                "ru": "Готово"},
