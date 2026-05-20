@@ -159,6 +159,20 @@ def list_meetings(context_name: Optional[str] = None, limit: int = 200) -> list[
     return [dict(r) for r in rows]
 
 
+def update_meeting_context(meeting_id: int, context_name: Optional[str]):
+    """Reassign a meeting to a different series. None clears the assignment.
+
+    Creates the context row if a non-empty name is given that doesn't exist yet.
+    """
+    conn = get_connection()
+    if context_name:
+        ctx_id = get_context_id(context_name) or create_context(context_name)
+    else:
+        ctx_id = None
+    conn.execute("UPDATE meetings SET context_id = ? WHERE id = ?", (ctx_id, meeting_id))
+    conn.commit()
+
+
 def get_meeting(meeting_id: int) -> Optional[dict]:
     conn = get_connection()
     row = conn.execute(

@@ -99,6 +99,19 @@ def _make_eye_icon(size: int = 24, color: QColor = QColor("#4A90D9")) -> QIcon:
     return QIcon(pm)
 
 
+class _ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.pos()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 def _make_history_icon(size: int = 32, color: QColor = QColor("#4A90D9")) -> QIcon:
     """Draw a simple clock icon for history."""
     pm = QPixmap(size, size)
@@ -1912,9 +1925,14 @@ class HistoryDialog(QDialog):
             else:
                 dur_str = "—"
 
-            ctx_lbl = QLabel(f"<b>{ctx}</b>")
+            ctx_lbl = _ClickableLabel(f"<b>{ctx}</b>")
             ctx_lbl.setFixedWidth(240)
-            ctx_lbl.setStyleSheet(_no_border)
+            ctx_lbl.setToolTip(t("history_change_series_tt"))
+            ctx_lbl.setStyleSheet(
+                f"QLabel {{ border: none; background: transparent; }}"
+                f"QLabel:hover {{ color: {C['primary']}; }}"
+            )
+            ctx_lbl.clicked.connect(lambda mid=m["id"], lbl=ctx_lbl: self._change_series(mid, lbl))
             hlay.addWidget(ctx_lbl)
 
             date_lbl = QLabel(ts)
@@ -1969,6 +1987,72 @@ class HistoryDialog(QDialog):
 
         dlg = _TextViewDialog(dlg_title, text, self, save_cb=save_cb)
         dlg.exec()
+
+    def _change_series(self, meeting_id: int, label: QLabel):
+        from . import db
+        from PyQt6.QtWidgets import QInputDialog
+
+        existing = db.list_contexts()
+        current = next((mm.get("context_name") for mm in self._meetings if mm["id"] == meeting_id), None)
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(t("history_change_series"))
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+
+        combo = QComboBox()
+        NEW_SENTINEL = "__NEW__"
+        combo.addItem(t("history_no_series"), None)
+        for name in existing:
+            combo.addItem(name, name)
+        combo.addItem(t("history_new_series"), NEW_SENTINEL)
+
+        if current and current in existing:
+            idx = combo.findData(current)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)  # No series
+        lay.addWidget(combo)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton(t("btn_yes"))
+        ok_btn.setStyleSheet(theme.btn_secondary())
+        ok_btn.clicked.connect(dlg.accept)
+        cancel_btn = QPushButton(t("btn_no"))
+        cancel_btn.setStyleSheet(theme.btn_secondary())
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        lay.addLayout(btn_row)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        choice = combo.currentData()
+        if choice == NEW_SENTINEL:
+            name, ok = QInputDialog.getText(self, t("new_context_title"), t("new_context_prompt"))
+            if not ok:
+                return
+            name = name.strip()
+            if not name:
+                return
+            new_ctx = name
+        else:
+            new_ctx = choice  # None or existing name
+
+        if new_ctx == current:
+            return
+
+        db.update_meeting_context(meeting_id, new_ctx)
+
+        for mm in self._meetings:
+            if mm["id"] == meeting_id:
+                mm["context_name"] = new_ctx
+                break
+        label.setText(f"<b>{new_ctx or t('history_no_series_short')}</b>")
 
 
 class _LocalLLMRow(QWidget):

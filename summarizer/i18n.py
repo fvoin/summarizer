@@ -329,6 +329,11 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "history_summary":          {"en": "Summary",                            "ru": "Саммари"},
     "history_empty":            {"en": "No meetings recorded yet.",          "ru": "Пока нет записанных встреч."},
     "history_view_title":       {"en": "{type} — {title}",                   "ru": "{type} — {title}"},
+    "history_change_series_tt": {"en": "Click to change meeting series",     "ru": "Нажмите, чтобы изменить серию"},
+    "history_change_series":    {"en": "Move meeting to series",             "ru": "Переместить встречу в серию"},
+    "history_no_series":        {"en": "— No series —",                      "ru": "— Без серии —"},
+    "history_new_series":       {"en": "+ New series…",                      "ru": "+ Новая серия…"},
+    "history_no_series_short":  {"en": "—",                                  "ru": "—"},
 
     # ── Context editor dialog ────────────────────────────────────────────
     "ctx_editor_title":         {"en": "Edit meeting series — {name}",       "ru": "Редактировать серию встреч — {name}"},
