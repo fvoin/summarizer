@@ -103,6 +103,7 @@ pyinstaller \
     --hidden-import "faster_whisper" \
     --hidden-import "sounddevice" \
     --hidden-import "soundfile" \
+    --hidden-import "ScreenCaptureKit" \
     --hidden-import "numpy" \
     --hidden-import "ctranslate2" \
     --hidden-import "tokenizers" \
@@ -126,6 +127,10 @@ PLIST="dist/Summarizer.app/Contents/Info.plist"
 if [ -f "$PLIST" ]; then
     /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Summarizer needs microphone access to record audio for transcription.'" "$PLIST" 2>/dev/null || \
     /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 'Summarizer needs microphone access to record audio for transcription.'" "$PLIST"
+
+    # Screen Recording permission (for ScreenCaptureKit system audio capture)
+    /usr/libexec/PlistBuddy -c "Add :NSScreenCaptureUsageDescription string 'Summarizer uses Screen Recording to capture system audio from meetings (no video is recorded).'" "$PLIST" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c "Set :NSScreenCaptureUsageDescription 'Summarizer uses Screen Recording to capture system audio from meetings (no video is recorded).'" "$PLIST"
 fi
 
 # 9. Deep codesign: sign every binary inside-out so macOS PAC checks pass

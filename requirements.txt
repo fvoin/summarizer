@@ -8,4 +8,5 @@ openai
 anthropic
 certifi
 pyobjc-framework-Cocoa
+pyobjc-framework-ScreenCaptureKit
 pyinstaller

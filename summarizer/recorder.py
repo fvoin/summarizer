@@ -54,6 +54,8 @@ class AudioRecorder:
         self._rt_frames_per_device: dict = {}
         self._rt_lock = threading.Lock()
 
+        self._sys_audio = None  # SystemAudioRecorder when active
+
     # ── device listing ───────────────────────────────────────────────────
 
     @staticmethod
@@ -118,6 +120,7 @@ class AudioRecorder:
         all_devs = self.list_devices()
         selected = []
 
+        has_loopback = False
         if self._input_device is not None:
             selected.append(self._input_device)
         else:
@@ -132,6 +135,7 @@ class AudioRecorder:
                 selected.append(loopback)
                 if default_in != loopback:
                     selected.append(default_in)
+                has_loopback = True
             else:
                 selected.append(default_in)
 
@@ -171,6 +175,28 @@ class AudioRecorder:
             t.start()
             self._threads.append(t)
 
+        # System audio via ScreenCaptureKit (when no loopback device is present)
+        self._sys_audio = None
+        if not has_loopback:
+            try:
+                from . import system_audio
+                if system_audio.is_available():
+                    sys_tmp = os.path.join(tmp_dir, f"summarizer_sys_{ts}.wav")
+                    self._sys_audio = system_audio.SystemAudioRecorder(
+                        sample_rate=self.sample_rate,
+                        output_path=sys_tmp,
+                        on_audio_chunk=self._on_system_audio_chunk,
+                    )
+                    if self._sys_audio.start():
+                        self._temp_files.append(sys_tmp)
+                        _log("System audio capture active via ScreenCaptureKit")
+                    else:
+                        _log(f"System audio capture failed: {self._sys_audio.error}")
+                        self._sys_audio = None
+            except Exception:
+                _logger.exception("System audio init error")
+                self._sys_audio = None
+
         self._monitor_thread = threading.Thread(target=self._monitor_silence, daemon=True)
         self._monitor_thread.start()
         return self._audio_file
@@ -196,6 +222,18 @@ class AudioRecorder:
         min_len = min(len(a) for a in device_arrays)
         mixed = np.mean([a[:min_len].astype(np.float64) for a in device_arrays], axis=0)
         return mixed.astype(np.float32)
+
+    _SYS_AUDIO_DEV = -1
+
+    def _on_system_audio_chunk(self, audio: np.ndarray):
+        """Called from SystemAudioRecorder with each audio buffer."""
+        if not self._detect_silence(audio):
+            with self._sound_time_lock:
+                self._last_sound_time = time.time()
+        with self._rt_lock:
+            if self._SYS_AUDIO_DEV not in self._rt_frames_per_device:
+                self._rt_frames_per_device[self._SYS_AUDIO_DEV] = []
+            self._rt_frames_per_device[self._SYS_AUDIO_DEV].append(audio.copy())
 
     def _record_to_file(self, device_id: int, filename: str, stop_event: threading.Event):
         try:
@@ -251,6 +289,10 @@ class AudioRecorder:
             t.join(timeout=5)
         if self._monitor_thread and self._monitor_thread != threading.current_thread():
             self._monitor_thread.join(timeout=5)
+
+        if self._sys_audio:
+            self._sys_audio.stop()
+            self._sys_audio = None
 
         existing = [f for f in self._temp_files if os.path.exists(f)]
         _log(f"Temp files: {self._temp_files}")
