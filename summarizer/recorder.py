@@ -127,14 +127,14 @@ class AudioRecorder:
 
         all_devs = self.list_devices()
 
-        # Mic input: user-picked device, or system default mic
-        if self._input_device is not None:
-            mic_devices = [self._input_device]
-        else:
-            default_mic = self._resolve_default_input(all_devs)
-            mic_devices = [default_mic] if default_mic is not None else []
-            if not mic_devices:
-                _log("No usable input device found — recording system audio only")
+        # Mic input: resolve the user's choice (name, legacy index, or None)
+        # to a live, validated input-device id. Indices drift as devices come
+        # and go, so a saved index — or even a saved name that's unplugged —
+        # may not be capturable right now; fall back to a real mic.
+        mic_id = self._resolve_input(self._input_device, all_devs)
+        mic_devices = [mic_id] if mic_id is not None else []
+        if not mic_devices:
+            _log("No usable input device found — recording system audio only")
 
         import tempfile
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -291,6 +291,44 @@ class AudioRecorder:
             if self._SYS_AUDIO_DEV not in self._rt_frames_per_device:
                 self._rt_frames_per_device[self._SYS_AUDIO_DEV] = []
             self._rt_frames_per_device[self._SYS_AUDIO_DEV].append(audio.copy())
+
+    def _resolve_input(self, requested, all_devs: List[Dict]) -> Optional[int]:
+        """Resolve a saved mic choice to a live input-device id, or None.
+
+        ``requested`` may be:
+          * None         — no explicit choice; use the system default.
+          * str          — a device NAME (the stable identifier we persist).
+          * int          — a legacy saved PortAudio index (older configs).
+
+        Device names are matched against the current input list; a saved index
+        is honoured only if it still points at a valid input device. Anything
+        that no longer resolves falls back to ``_resolve_default_input`` so the
+        mic is never silently dropped just because indices shifted.
+        """
+        if requested is None:
+            return self._resolve_default_input(all_devs)
+
+        if isinstance(requested, str):
+            # Exact name match first, then a prefix match (macOS sometimes
+            # appends suffixes like " #2" or localised qualifiers).
+            for d in all_devs:
+                if d["name"] == requested:
+                    return d["id"]
+            for d in all_devs:
+                if d["name"].startswith(requested) or requested.startswith(d["name"]):
+                    _log(f"Mic '{requested}' matched by prefix to '{d['name']}'")
+                    return d["id"]
+            _log(f"Saved mic '{requested}' not currently available; "
+                 f"falling back to default input")
+            return self._resolve_default_input(all_devs)
+
+        # Legacy integer index.
+        valid = {d["id"] for d in all_devs}
+        if requested in valid:
+            return requested
+        _log(f"Saved mic index {requested} is no longer a valid input device; "
+             f"falling back to default input")
+        return self._resolve_default_input(all_devs)
 
     def _resolve_default_input(self, all_devs: List[Dict]) -> Optional[int]:
         """Return a usable default-input device id, or None.

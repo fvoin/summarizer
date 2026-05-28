@@ -2433,9 +2433,16 @@ class SettingsDialog(QDialog):
 
         self.device_combo = theme.FlatComboBox()
         self.device_combo.addItem(t("device_default"), None)
-        for dev in AudioRecorder.list_devices():
-            self.device_combo.addItem(dev["name"], dev["id"])
+        # Persist the device NAME, not its PortAudio index: indices drift as
+        # devices connect/disconnect, so a saved index can later point at the
+        # wrong mic (or a virtual device) and the user's voice goes unrecorded.
+        devs = AudioRecorder.list_devices()
+        for dev in devs:
+            self.device_combo.addItem(dev["name"], dev["name"])
         saved_dev = self.cfg.get("input_device")
+        # Map a legacy saved index (older builds stored an int) to its name.
+        if isinstance(saved_dev, int):
+            saved_dev = next((d["name"] for d in devs if d["id"] == saved_dev), None)
         if saved_dev is not None:
             for i in range(self.device_combo.count()):
                 if self.device_combo.itemData(i) == saved_dev:
