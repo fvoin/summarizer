@@ -91,6 +91,7 @@ echo "Building Summarizer.app with PyInstaller…"
 pyinstaller \
     --windowed \
     --name "Summarizer" \
+    --osx-bundle-identifier "com.fvoin.summarizer" \
     --noconfirm \
     --clean \
     $ICON_ARG \
