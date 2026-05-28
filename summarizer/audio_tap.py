@@ -128,15 +128,27 @@ def _io_proc(device, _now, input_p, _input_t, _output_p, _output_t, _client):
         n = bl.mNumberBuffers
         if n == 0:
             return 0
-        # mBuffers starts after mNumberBuffers (uint32)
+        # mBuffers is 8-byte aligned (it holds a pointer), so it starts at
+        # offset 8 — NOT 4 — after the uint32 mNumberBuffers. Use the field's
+        # real address rather than hand-computing the offset, which silently
+        # dropped the 4 bytes of struct padding and produced wild mData
+        # pointers (memmove crash on the CoreAudio IO thread).
         buf_array = ctypes.cast(
-            ctypes.addressof(bl) + ctypes.sizeof(ctypes.c_uint32),
+            ctypes.addressof(bl.mBuffers),
             ctypes.POINTER(AudioBuffer),
         )
         chunks = []
         for i in range(n):
             buf = buf_array[i]
             if buf.mData and buf.mDataByteSize > 0:
+                # One-time confirmation that system audio is actually flowing —
+                # invaluable when diagnosing "only my voice was recorded" reports.
+                if not rec._logged_first_chunk:
+                    rec._logged_first_chunk = True
+                    _logger.info(
+                        "Audio tap: first audio buffer (%d buffers, %d ch, %d bytes)",
+                        n, buf.mNumberChannels, buf.mDataByteSize,
+                    )
                 nch = buf.mNumberChannels or 1
                 raw = ctypes.string_at(buf.mData, buf.mDataByteSize)
                 samples = np.frombuffer(raw, dtype=np.float32)
@@ -182,6 +194,7 @@ class AudioTapRecorder:
         self._ioproc_id: Optional[ctypes.c_void_p] = None
         self._sound_file: Optional[sf.SoundFile] = None
         self._file_lock = threading.Lock()
+        self._logged_first_chunk = False
         self.error: Optional[str] = None
 
     def start(self) -> bool:
