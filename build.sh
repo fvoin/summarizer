@@ -105,6 +105,7 @@ pyinstaller \
     --hidden-import "sounddevice" \
     --hidden-import "soundfile" \
     --hidden-import "ScreenCaptureKit" \
+    --hidden-import "CoreAudio" \
     --hidden-import "numpy" \
     --hidden-import "ctranslate2" \
     --hidden-import "tokenizers" \
@@ -132,6 +133,10 @@ if [ -f "$PLIST" ]; then
     # Screen Recording permission (for ScreenCaptureKit system audio capture)
     /usr/libexec/PlistBuddy -c "Add :NSScreenCaptureUsageDescription string 'Summarizer uses Screen Recording to capture system audio from meetings (no video is recorded).'" "$PLIST" 2>/dev/null || \
     /usr/libexec/PlistBuddy -c "Set :NSScreenCaptureUsageDescription 'Summarizer uses Screen Recording to capture system audio from meetings (no video is recorded).'" "$PLIST"
+
+    # System Audio Recording permission (for Core Audio Process Taps)
+    /usr/libexec/PlistBuddy -c "Add :NSAudioCaptureUsageDescription string 'Summarizer captures system audio to transcribe meeting participants.'" "$PLIST" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c "Set :NSAudioCaptureUsageDescription 'Summarizer captures system audio to transcribe meeting participants.'" "$PLIST"
 fi
 
 # 9. Deep codesign: sign every binary inside-out so macOS PAC checks pass

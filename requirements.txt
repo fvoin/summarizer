@@ -9,4 +9,5 @@ anthropic
 certifi
 pyobjc-framework-Cocoa
 pyobjc-framework-ScreenCaptureKit
+pyobjc-framework-CoreAudio
 pyinstaller

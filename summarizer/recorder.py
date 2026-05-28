@@ -55,6 +55,7 @@ class AudioRecorder:
         self._rt_lock = threading.Lock()
 
         self._sys_audio = None  # SystemAudioRecorder when active
+        self._sys_audio_rate = 44100  # source rate of system audio callbacks
 
     # ── device listing ───────────────────────────────────────────────────
 
@@ -144,41 +145,69 @@ class AudioRecorder:
 
         tmp_dir = tempfile.gettempdir()
 
-        # ── System audio: prefer ScreenCaptureKit (works with headphones) ──
+        # ── System audio: prefer Core Audio Process Tap (audio-only perm) ──
         self._sys_audio = None
-        sck_started = False
+        sys_started = False
+
         try:
-            from . import system_audio
-            sck_available = system_audio.is_available()
-            _log(f"ScreenCaptureKit available: {sck_available}")
-            if sck_available:
+            from . import audio_tap
+            tap_available = audio_tap.is_available()
+            _log(f"Core Audio Process Tap available: {tap_available}")
+            if tap_available:
                 sys_tmp = os.path.join(tmp_dir, f"summarizer_sys_{ts}.wav")
-                self._sys_audio = system_audio.SystemAudioRecorder(
-                    sample_rate=self.sample_rate,
+                self._sys_audio = audio_tap.AudioTapRecorder(
+                    sample_rate=48000,
                     output_path=sys_tmp,
                     on_audio_chunk=self._on_system_audio_chunk,
                 )
-                _log("Starting ScreenCaptureKit system audio capture…")
+                _log("Starting Core Audio Process Tap…")
                 if self._sys_audio.start():
-                    sck_started = True
+                    sys_started = True
+                    self._sys_audio_rate = 48000
                     self._temp_files.append(sys_tmp)
-                    _log("System audio capture active via ScreenCaptureKit")
+                    _log("System audio capture active via Core Audio Process Tap")
                 else:
-                    _log(f"ScreenCaptureKit failed: {self._sys_audio.error}")
+                    _log(f"Process Tap failed: {self._sys_audio.error}")
                     self._sys_audio = None
         except Exception:
-            _logger.exception("ScreenCaptureKit init error")
+            _logger.exception("Process Tap init error")
             self._sys_audio = None
 
-        # ── Fallback: add BlackHole/Loopback as input device if SCK didn't work ──
+        # Fall back to ScreenCaptureKit on older macOS (13.x – 14.1)
+        if not sys_started:
+            try:
+                from . import system_audio
+                sck_available = system_audio.is_available()
+                _log(f"ScreenCaptureKit available: {sck_available}")
+                if sck_available:
+                    sys_tmp = os.path.join(tmp_dir, f"summarizer_sys_{ts}.wav")
+                    self._sys_audio = system_audio.SystemAudioRecorder(
+                        sample_rate=self.sample_rate,
+                        output_path=sys_tmp,
+                        on_audio_chunk=self._on_system_audio_chunk,
+                    )
+                    _log("Starting ScreenCaptureKit system audio capture…")
+                    if self._sys_audio.start():
+                        sys_started = True
+                        self._sys_audio_rate = self.sample_rate
+                        self._temp_files.append(sys_tmp)
+                        _log("System audio capture active via ScreenCaptureKit")
+                    else:
+                        _log(f"ScreenCaptureKit failed: {self._sys_audio.error}")
+                        self._sys_audio = None
+            except Exception:
+                _logger.exception("ScreenCaptureKit init error")
+                self._sys_audio = None
+
+        # ── Fallback: add BlackHole/Loopback as input device if neither worked ──
         selected = list(mic_devices)
-        if not sck_started and self._input_device is None:
+        if not sys_started and self._input_device is None:
             for d in all_devs:
                 name = d["name"].lower()
                 if "blackhole" in name or "loopback" in name or "monitor" in name:
                     if d["id"] not in selected:
                         selected.append(d["id"])
-                        _log(f"SCK unavailable — using loopback fallback: {d['name']}")
+                        _log(f"System audio APIs unavailable — using loopback fallback: {d['name']}")
                     break
 
         selected = list(set(selected))
@@ -229,6 +258,14 @@ class AudioRecorder:
 
     def _on_system_audio_chunk(self, audio: np.ndarray):
         """Called from SystemAudioRecorder with each audio buffer."""
+        # Resample to mic rate (44.1k) for the RT buffer if sources differ
+        if self._sys_audio_rate != self.sample_rate and len(audio) > 1:
+            new_len = max(1, int(len(audio) * self.sample_rate / self._sys_audio_rate))
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, new_len),
+                np.arange(len(audio)),
+                audio,
+            ).astype(np.float32)
         if not self._detect_silence(audio):
             with self._sound_time_lock:
                 self._last_sound_time = time.time()
@@ -359,7 +396,13 @@ class AudioRecorder:
         cmd = [ffmpeg, "-y"]
         for inp in inputs:
             cmd.extend(["-i", inp])
-        cmd.extend(["-filter_complex", f"amix=inputs={len(inputs)}:duration=longest", output])
+        # Resample each input to 44100 Hz before mixing (tap runs at 48k, mic at 44.1k)
+        filter_parts = [f"[{i}:a]aresample=44100[a{i}]" for i in range(len(inputs))]
+        filter_parts.append(
+            "".join(f"[a{i}]" for i in range(len(inputs)))
+            + f"amix=inputs={len(inputs)}:duration=longest"
+        )
+        cmd.extend(["-filter_complex", ";".join(filter_parts), output])
         _log(f"Mixing {len(inputs)} files with: {ffmpeg}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
