@@ -118,33 +118,12 @@ class AudioRecorder:
         self._on_auto_stop = on_auto_stop
 
         all_devs = self.list_devices()
-        selected = []
 
-        has_loopback = False
+        # Mic input: user-picked device, or system default mic
         if self._input_device is not None:
-            selected.append(self._input_device)
+            mic_devices = [self._input_device]
         else:
-            loopback = None
-            for d in all_devs:
-                name = d["name"].lower()
-                if "blackhole" in name or "loopback" in name or "monitor" in name:
-                    loopback = d["id"]
-                    break
-            default_in = sd.default.device[0]
-            if loopback is not None:
-                selected.append(loopback)
-                if default_in != loopback:
-                    selected.append(default_in)
-                has_loopback = True
-            else:
-                selected.append(default_in)
-
-        selected = list(set(selected))
-        _log(f"Selected device IDs: {selected}")
-        for idx in selected:
-            for d in all_devs:
-                if d["id"] == idx:
-                    _log(f"Recording from device {idx}: {d['name']} ({d['channels']}ch)")
+            mic_devices = [sd.default.device[0]]
 
         import tempfile
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -164,6 +143,51 @@ class AudioRecorder:
             self._rt_frames_per_device = {}
 
         tmp_dir = tempfile.gettempdir()
+
+        # ── System audio: prefer ScreenCaptureKit (works with headphones) ──
+        self._sys_audio = None
+        sck_started = False
+        try:
+            from . import system_audio
+            sck_available = system_audio.is_available()
+            _log(f"ScreenCaptureKit available: {sck_available}")
+            if sck_available:
+                sys_tmp = os.path.join(tmp_dir, f"summarizer_sys_{ts}.wav")
+                self._sys_audio = system_audio.SystemAudioRecorder(
+                    sample_rate=self.sample_rate,
+                    output_path=sys_tmp,
+                    on_audio_chunk=self._on_system_audio_chunk,
+                )
+                _log("Starting ScreenCaptureKit system audio capture…")
+                if self._sys_audio.start():
+                    sck_started = True
+                    self._temp_files.append(sys_tmp)
+                    _log("System audio capture active via ScreenCaptureKit")
+                else:
+                    _log(f"ScreenCaptureKit failed: {self._sys_audio.error}")
+                    self._sys_audio = None
+        except Exception:
+            _logger.exception("ScreenCaptureKit init error")
+            self._sys_audio = None
+
+        # ── Fallback: add BlackHole/Loopback as input device if SCK didn't work ──
+        selected = list(mic_devices)
+        if not sck_started and self._input_device is None:
+            for d in all_devs:
+                name = d["name"].lower()
+                if "blackhole" in name or "loopback" in name or "monitor" in name:
+                    if d["id"] not in selected:
+                        selected.append(d["id"])
+                        _log(f"SCK unavailable — using loopback fallback: {d['name']}")
+                    break
+
+        selected = list(set(selected))
+        _log(f"Selected mic device IDs: {selected}")
+        for idx in selected:
+            for d in all_devs:
+                if d["id"] == idx:
+                    _log(f"Recording from device {idx}: {d['name']} ({d['channels']}ch)")
+
         for idx in selected:
             tmp = os.path.join(tmp_dir, f"summarizer_rec_{ts}_{idx}.wav")
             self._temp_files.append(tmp)
@@ -174,28 +198,6 @@ class AudioRecorder:
             )
             t.start()
             self._threads.append(t)
-
-        # System audio via ScreenCaptureKit (when no loopback device is present)
-        self._sys_audio = None
-        if not has_loopback:
-            try:
-                from . import system_audio
-                if system_audio.is_available():
-                    sys_tmp = os.path.join(tmp_dir, f"summarizer_sys_{ts}.wav")
-                    self._sys_audio = system_audio.SystemAudioRecorder(
-                        sample_rate=self.sample_rate,
-                        output_path=sys_tmp,
-                        on_audio_chunk=self._on_system_audio_chunk,
-                    )
-                    if self._sys_audio.start():
-                        self._temp_files.append(sys_tmp)
-                        _log("System audio capture active via ScreenCaptureKit")
-                    else:
-                        _log(f"System audio capture failed: {self._sys_audio.error}")
-                        self._sys_audio = None
-            except Exception:
-                _logger.exception("System audio init error")
-                self._sys_audio = None
 
         self._monitor_thread = threading.Thread(target=self._monitor_silence, daemon=True)
         self._monitor_thread.start()
