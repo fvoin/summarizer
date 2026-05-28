@@ -131,7 +131,10 @@ class AudioRecorder:
         if self._input_device is not None:
             mic_devices = [self._input_device]
         else:
-            mic_devices = [sd.default.device[0]]
+            default_mic = self._resolve_default_input(all_devs)
+            mic_devices = [default_mic] if default_mic is not None else []
+            if not mic_devices:
+                _log("No usable input device found — recording system audio only")
 
         import tempfile
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -289,32 +292,105 @@ class AudioRecorder:
                 self._rt_frames_per_device[self._SYS_AUDIO_DEV] = []
             self._rt_frames_per_device[self._SYS_AUDIO_DEV].append(audio.copy())
 
+    def _resolve_default_input(self, all_devs: List[Dict]) -> Optional[int]:
+        """Return a usable default-input device id, or None.
+
+        ``sd.default.device[0]`` is a PortAudio index that drifts as devices
+        appear/disappear (Continuity iPhone mic, BlackHole, Zoom, aggregate
+        devices). It can point at a device with no input channels, in which
+        case opening it raises PortAudioError -9998 and the mic thread dies —
+        the user's voice is silently dropped. Validate the index against the
+        live input list and fall back to a real input device, preferring a
+        physical mic over virtual/loopback devices.
+        """
+        valid = {d["id"] for d in all_devs}
+        try:
+            default_idx = sd.default.device[0]
+        except Exception:
+            default_idx = None
+        if default_idx is not None and default_idx in valid:
+            return default_idx
+        _log(f"Default input index {default_idx} is not a usable input device; "
+             f"falling back. Available inputs: {[(d['id'], d['name']) for d in all_devs]}")
+        if not all_devs:
+            return None
+
+        def virtual_rank(d: Dict) -> int:
+            n = d["name"].lower()
+            if any(k in n for k in ("blackhole", "loopback", "aggregate",
+                                    "zoom", "монитор", "monitor", "агрегат")):
+                return 1  # de-prioritise virtual / loopback devices
+            return 0
+
+        return sorted(all_devs, key=virtual_rank)[0]["id"]
+
     def _record_to_file(self, device_id: int, filename: str, stop_event: threading.Event):
         try:
-            _log(f"Opening InputStream on device {device_id}, sr={self.sample_rate}, ch={self.channels}")
-            frames_written = 0
-            with sf.SoundFile(filename, mode="w", samplerate=self.sample_rate, channels=self.channels) as f:
-                def callback(indata, frame_count, time_info, status):
-                    nonlocal frames_written
-                    if status:
-                        _log(f"Stream status: {status}")
-                    if not self._detect_silence(indata):
-                        with self._sound_time_lock:
-                            self._last_sound_time = time.time()
-                    f.write(indata)
-                    frames_written += frame_count
-                    with self._rt_lock:
-                        if device_id not in self._rt_frames_per_device:
-                            self._rt_frames_per_device[device_id] = []
-                        self._rt_frames_per_device[device_id].append(indata.copy())
+            try:
+                info = sd.query_devices(device_id)
+                max_in = int(info.get("max_input_channels", 0))
+                dev_name = info.get("name", "?")
+            except Exception:
+                max_in, dev_name = 0, "?"
+            if max_in < 1:
+                _log(f"Device {device_id} ({dev_name}) reports no input channels — "
+                     f"skipping mic capture")
+                return
 
-                with sd.InputStream(device=device_id, samplerate=self.sample_rate, channels=self.channels, callback=callback):
-                    while not stop_event.is_set():
-                        time.sleep(0.1)
-
-            _log(f"Recording thread done (dev {device_id}): {frames_written} frames → {filename}")
-        except Exception as e:
+            # The output file is always mono. Open the stream in mono when the
+            # device allows it, otherwise open at the device's native channel
+            # count and down-mix. Opening with an unsupported channel count
+            # raises PortAudioError -9998 ("Invalid number of channels"), which
+            # used to kill this thread and drop the user's voice entirely.
+            candidates = [1, max_in] if max_in > 1 else [1]
+            last_err: Optional[Exception] = None
+            for stream_channels in candidates:
+                try:
+                    self._stream_mic_to_file(
+                        device_id, filename, stop_event, stream_channels, dev_name,
+                    )
+                    return
+                except sd.PortAudioError as e:
+                    last_err = e
+                    _log(f"Mic dev {device_id} ({dev_name}) open failed at "
+                         f"{stream_channels}ch: {e}")
+            _logger.error("Could not open mic device %s (%s) with any channel "
+                          "count: %s", device_id, dev_name, last_err)
+        except Exception:
             _logger.exception("Recording thread error (dev %s)", device_id)
+
+    def _stream_mic_to_file(self, device_id: int, filename: str,
+                            stop_event: threading.Event, stream_channels: int,
+                            dev_name: str):
+        _log(f"Opening InputStream on device {device_id} ({dev_name}), "
+             f"sr={self.sample_rate}, ch={stream_channels}")
+        frames_written = 0
+        with sf.SoundFile(filename, mode="w", samplerate=self.sample_rate, channels=1) as f:
+            def callback(indata, frame_count, time_info, status):
+                nonlocal frames_written
+                if status:
+                    _log(f"Stream status: {status}")
+                # Down-mix to mono (frames, 1) regardless of stream channel count.
+                if indata.ndim > 1 and indata.shape[1] > 1:
+                    mono = indata.mean(axis=1, keepdims=True).astype(np.float32)
+                else:
+                    mono = indata.reshape(-1, 1).astype(np.float32)
+                if not self._detect_silence(mono):
+                    with self._sound_time_lock:
+                        self._last_sound_time = time.time()
+                f.write(mono)
+                frames_written += frame_count
+                with self._rt_lock:
+                    if device_id not in self._rt_frames_per_device:
+                        self._rt_frames_per_device[device_id] = []
+                    self._rt_frames_per_device[device_id].append(mono.copy())
+
+            with sd.InputStream(device=device_id, samplerate=self.sample_rate,
+                                channels=stream_channels, callback=callback):
+                while not stop_event.is_set():
+                    time.sleep(0.1)
+
+        _log(f"Recording thread done (dev {device_id}): {frames_written} frames → {filename}")
 
     def _monitor_silence(self):
         while not self._stop_event.is_set() and self._recording:
