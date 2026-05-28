@@ -252,7 +252,15 @@ class AudioRecorder:
         for dev_id in sorted(snapshot.keys()):
             frames = snapshot[dev_id]
             if frames:
-                device_arrays.append(np.concatenate(frames, axis=0))
+                arr = np.concatenate(frames, axis=0)
+                # Normalise every device buffer to 1-D mono. The mic InputStream
+                # delivers 2-D frames (N, channels) while the system-audio tap
+                # delivers 1-D mono (N,); mixing the two shapes with np.mean
+                # raises ValueError (inhomogeneous shape). Down-mix to mono so
+                # all device arrays share one shape.
+                if arr.ndim > 1:
+                    arr = arr.mean(axis=1)
+                device_arrays.append(arr.astype(np.float32))
         if not device_arrays:
             return None
         if len(device_arrays) == 1:

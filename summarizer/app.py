@@ -3762,16 +3762,24 @@ class MainWindow(QMainWindow):
         _logger.info("RT transcription ready, timer started")
 
     def _on_rt_tick(self):
-        """Timer fires every 10 s: push only the new audio delta since last commit."""
-        if not self._recorder or not self._rt_worker or not self._rt_model_ready:
-            return
-        all_audio = self._recorder.get_all_rt_audio()
-        if all_audio is None or len(all_audio) == 0:
-            return
-        delta = all_audio[self._rt_committed_len:]
-        if len(delta) < self._rt_sample_rate * 3.0:
-            return
-        self._rt_worker.push_audio(delta, self._rt_sample_rate)
+        """Timer fires every 10 s: push only the new audio delta since last commit.
+
+        Wrapped in try/except: this is a Qt timer slot, and any exception that
+        escapes a PyQt slot calls abort() and kills the whole app. A transient
+        RT-transcription hiccup must never take the app down.
+        """
+        try:
+            if not self._recorder or not self._rt_worker or not self._rt_model_ready:
+                return
+            all_audio = self._recorder.get_all_rt_audio()
+            if all_audio is None or len(all_audio) == 0:
+                return
+            delta = all_audio[self._rt_committed_len:]
+            if len(delta) < self._rt_sample_rate * 3.0:
+                return
+            self._rt_worker.push_audio(delta, self._rt_sample_rate)
+        except Exception:
+            _logger.exception("RT tick failed (recording continues)")
 
     def _on_rt_chunk(self, text: str, audio_len: int):
         """Append the new transcription chunk to the displayed text."""
