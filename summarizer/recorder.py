@@ -61,6 +61,9 @@ class AudioRecorder:
         self._sys_audio = None  # SystemAudioRecorder when active
         self._sys_audio_rate = 44100  # source rate of system audio callbacks
 
+        self._mic_files = []
+        self._sys_file = None
+
     # ── device listing ───────────────────────────────────────────────────
 
     @staticmethod
@@ -149,6 +152,8 @@ class AudioRecorder:
         self._calibration_samples = []
         self._calibration_end = now + self._CALIBRATION_SECS
         self._temp_files = []
+        self._mic_files = []
+        self._sys_file = None
         self._threads = []
         with self._rt_lock:
             self._rt_frames_per_device = {}
@@ -175,6 +180,7 @@ class AudioRecorder:
                     sys_started = True
                     self._sys_audio_rate = 48000
                     self._temp_files.append(sys_tmp)
+                    self._sys_file = sys_tmp
                     _log("System audio capture active via Core Audio Process Tap")
                 else:
                     _log(f"Process Tap failed: {self._sys_audio.error}")
@@ -201,6 +207,7 @@ class AudioRecorder:
                         sys_started = True
                         self._sys_audio_rate = self.sample_rate
                         self._temp_files.append(sys_tmp)
+                        self._sys_file = sys_tmp
                         _log("System audio capture active via ScreenCaptureKit")
                     else:
                         _log(f"ScreenCaptureKit failed: {self._sys_audio.error}")
@@ -230,6 +237,7 @@ class AudioRecorder:
         for idx in selected:
             tmp = os.path.join(tmp_dir, f"summarizer_rec_{ts}_{idx}.wav")
             self._temp_files.append(tmp)
+            self._mic_files.append(tmp)
             t = threading.Thread(
                 target=self._record_to_file,
                 args=(idx, tmp, self._stop_event),
@@ -486,11 +494,39 @@ class AudioRecorder:
             _logger.exception("Mixing failed")
             return None
         finally:
+            sources = set(self._mic_files)
+            if self._sys_file:
+                sources.add(self._sys_file)
             for f in self._temp_files:
+                if f in sources:
+                    continue  # retained for diarization; freed by cleanup_sources()
                 try:
                     os.unlink(f)
                 except OSError:
                     pass
+
+    def get_source_files(self) -> dict:
+        """Return the un-mixed per-stream source files that still exist.
+
+        {"mic": [paths...], "system": path | None}. Used for post-recording
+        speaker separation. Call cleanup_sources() when done with them.
+        """
+        mic = [f for f in self._mic_files if f and os.path.exists(f)]
+        system = self._sys_file if (self._sys_file and os.path.exists(self._sys_file)) else None
+        return {"mic": mic, "system": system}
+
+    def cleanup_sources(self) -> None:
+        """Delete the retained per-stream source files."""
+        for f in list(self._mic_files):
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+        if self._sys_file:
+            try:
+                os.unlink(self._sys_file)
+            except OSError:
+                pass
 
     def is_recording(self) -> bool:
         return self._recording and not (self._stop_event is not None and self._stop_event.is_set())
