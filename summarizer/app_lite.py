@@ -137,13 +137,13 @@ class LiteWindow(QMainWindow):
     def _plain_transcribe(self, mixed, wm):
         worker = TranscribeWorker(mixed, wm)
         worker.finished.connect(self._on_transcript)
-        worker.error.connect(lambda e: self.status.setText(t("lite_error", err=e)))
+        worker.error.connect(lambda e: (self._cleanup_sources(), self.status.setText(t("lite_error", err=e))))
         self._track(worker)
         worker.start()
 
-    def _on_plain_fallback(self, _err):
+    def _on_plain_fallback(self, err):
         self._cleanup_sources()
-        self.status.setText(t("lite_error", err="empty"))
+        self.status.setText(t("lite_error", err=err))
 
     def _on_transcript(self, text: str):
         self._cleanup_sources()
@@ -167,9 +167,13 @@ class LiteWindow(QMainWindow):
 
     def _track(self, worker):
         self._workers.append(worker)
-        worker.finished.connect(
-            lambda *_: self._workers.remove(worker) if worker in self._workers else None
-        )
+        worker.finished.connect(lambda *_: self._untrack(worker))
+        if hasattr(worker, "error"):
+            worker.error.connect(lambda *_: self._untrack(worker))
+
+    def _untrack(self, worker):
+        if worker in self._workers:
+            self._workers.remove(worker)
 
 
 def main():
