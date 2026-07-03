@@ -374,7 +374,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "agent_notify_error":       {"en": "Agent error: {error}",               "ru": "Ошибка агента: {error}"},
 
     # ── Lite window ──────────────────────────────────────────────────────
-    "lite_title": {"en": "Summarizer Transcriber", "ru": "Summarizer Транскрибатор"},
+    "lite_title": {"en": "Summarizer Lite", "ru": "Summarizer Lite"},
     "lite_ready": {"en": "Ready", "ru": "Готово"},
     "lite_placeholder": {"en": "Transcript will appear here.",
                           "ru": "Транскрипт появится здесь."},
