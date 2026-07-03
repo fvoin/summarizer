@@ -64,6 +64,17 @@ class LiteWindow(QMainWindow):
         self._live = LiveTranscriber(self)
         self._live.text_appended.connect(self._append_live)
 
+        self._agent_meeting = None
+        self._poller = None
+        cfg = config.load()
+        if cfg.get("agent_enabled") and cfg.get("agent_url") and cfg.get("agent_token"):
+            from .agent import AgentPoller
+            self._poller = AgentPoller(self)
+            self._poller.meeting_armed.connect(self._on_meeting_armed)
+            self._poller.error.connect(lambda e: _logger.warning("agent: %s", e))
+            self._poller.start()
+            self.status.setText(t("lite_agent_waiting"))
+
     # ── recording ────────────────────────────────────────────────
     def _toggle(self):
         if self._recorder and self._recorder.is_recording():
@@ -87,6 +98,13 @@ class LiteWindow(QMainWindow):
         self._timer.start()
         wm = cfg.get("whisper_model", "base")
         self._live.start(self._recorder, wm)
+
+    def _on_meeting_armed(self, meeting: dict):
+        if self._recorder and self._recorder.is_recording():
+            return  # already recording
+        self._agent_meeting = meeting
+        self.status.setText(t("lite_agent_recording", title=meeting.get("title", "")))
+        self._start()
 
     def _append_live(self, text: str):
         current = self.transcript.toPlainText()
@@ -153,8 +171,17 @@ class LiteWindow(QMainWindow):
         self._handle_result(text)  # overridden in Task 5 for agent upload
 
     def _handle_result(self, text: str):
-        """Manual recording: nothing more to do (copy only). Overridden in Task 5."""
-        pass
+        meeting = self._agent_meeting
+        self._agent_meeting = None
+        if not meeting:
+            return  # manual recording: copy only
+        meeting["_duration"] = self._last_duration
+        from .agent import PostCompleteWorker
+        worker = PostCompleteWorker(text, meeting)
+        worker.finished.connect(lambda _r: self.status.setText(t("lite_uploaded")))
+        worker.error.connect(lambda e: self.status.setText(t("lite_upload_failed", err=e)))
+        self._track(worker)
+        worker.start()
 
     def _cleanup_sources(self):
         if self._diar_recorder:
@@ -174,6 +201,12 @@ class LiteWindow(QMainWindow):
     def _untrack(self, worker):
         if worker in self._workers:
             self._workers.remove(worker)
+
+    def closeEvent(self, event):
+        if self._poller:
+            self._poller.stop()
+            self._poller.wait(2000)
+        super().closeEvent(event)
 
 
 def main():

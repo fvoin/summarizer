@@ -382,6 +382,12 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "lite_copied": {"en": "Copied to clipboard", "ru": "Скопировано в буфер обмена"},
     "lite_done": {"en": "Transcript ready", "ru": "Транскрипт готов"},
     "lite_error": {"en": "Transcription failed: {err}", "ru": "Ошибка транскрипции: {err}"},
+    "lite_agent_waiting": {"en": "Waiting for scheduled meetings…",
+                            "ru": "Ожидание запланированных встреч…"},
+    "lite_agent_recording": {"en": "Auto-recording: {title}",
+                              "ru": "Автозапись: {title}"},
+    "lite_uploaded": {"en": "Transcript uploaded", "ru": "Транскрипт загружен"},
+    "lite_upload_failed": {"en": "Upload failed: {err}", "ru": "Ошибка загрузки: {err}"},
 }
 
 
