@@ -746,8 +746,8 @@ git commit -m "feat: agent auto-record and upload in lite client"
 - Test: manual
 
 **Interfaces:**
-- Consumes: `widgets.MicPicker`, `config.load`/`config.save`, `config.is_model_downloaded`, `config.DEFAULT_CONFIG`, `transcriber.download_model`.
-- Produces: `LiteSetupWizard(QDialog)` with three steps — (1) mic permission + `MicPicker`, (2) backend `agent_url` + `agent_token`, (3) Whisper model download progress (model hard-coded to `config.DEFAULT_CONFIG["whisper_model"]`). Saves to config on finish. `should_run_setup() -> bool` returns True when `agent_url` is empty or the default Whisper model is not downloaded.
+- Consumes: `widgets.MicPicker`, `config.load`/`config.save`, `config.is_model_downloaded`, `transcriber.download_model`.
+- Produces: `LiteSetupWizard(QDialog)` with three steps — (1) mic permission + `MicPicker`, (2) backend `agent_url` + `agent_token`, (3) Whisper model download progress (model hard-coded to `cfg.get("whisper_model", "base")`). Saves to config on finish. `should_run_setup() -> bool` returns True when `agent_url` is empty or the default Whisper model is not downloaded.
 
 - [ ] **Step 1: Implement the wizard**
 
