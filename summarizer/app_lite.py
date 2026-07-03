@@ -103,8 +103,8 @@ class LiteWindow(QMainWindow):
         if self._recorder and self._recorder.is_recording():
             return  # already recording
         self._agent_meeting = meeting
-        self.status.setText(t("lite_agent_recording", title=meeting.get("title", "")))
         self._start()
+        self.status.setText(t("lite_agent_recording", title=meeting.get("title", "")))
 
     def _append_live(self, text: str):
         current = self.transcript.toPlainText()
@@ -135,6 +135,7 @@ class LiteWindow(QMainWindow):
 
         if not mixed:
             self._cleanup_sources()
+            self._agent_meeting = None
             self.status.setText(t("status_recording_failed"))
             return
 
@@ -168,7 +169,7 @@ class LiteWindow(QMainWindow):
         self.transcript.setPlainText(text)
         self.copy_btn.setEnabled(bool(text.strip()))
         self.status.setText(t("lite_done"))
-        self._handle_result(text)  # overridden in Task 5 for agent upload
+        self._handle_result(text)
 
     def _handle_result(self, text: str):
         meeting = self._agent_meeting
