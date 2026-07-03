@@ -1,4 +1,4 @@
-from summarizer.diarize import Segment, _normalize, _similarity, merge
+from summarizer.diarize import Segment, _normalize, _similarity, merge, format_transcript
 
 
 def test_segment_defaults_speaker_empty():
@@ -91,3 +91,27 @@ def test_merge_applies_offset_to_system():
     out = merge(mic, sys, offset=2.0)
     assert [s.speaker for s in out] == ["remote"]
     assert out[0].start == 2.0  # remote seg shifted onto mic timeline
+
+
+def test_format_transcript_en():
+    segs = [
+        Segment(0.0, 1.0, "hello", speaker="remote"),
+        Segment(1.0, 2.0, "hi back", speaker="me"),
+    ]
+    out = format_transcript(segs, locale="en")
+    assert out == "Remote: hello\nMe: hi back"
+
+
+def test_format_transcript_ru():
+    segs = [Segment(0.0, 1.0, "привет", speaker="remote")]
+    out = format_transcript(segs, locale="ru")
+    assert out == "Собеседник: привет"
+
+
+def test_format_transcript_skips_blank_text():
+    segs = [
+        Segment(0.0, 1.0, "   ", speaker="me"),
+        Segment(1.0, 2.0, "real", speaker="remote"),
+    ]
+    out = format_transcript(segs, locale="en")
+    assert out == "Remote: real"

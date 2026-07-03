@@ -79,3 +79,22 @@ def merge(
 
     result.sort(key=lambda seg: seg.start)
     return result
+
+
+_LABELS = {
+    "me": {"en": "Me", "ru": "Я"},
+    "remote": {"en": "Remote", "ru": "Собеседник"},
+}
+
+
+def format_transcript(segments: list, locale: str = "en") -> str:
+    lines = []
+    for seg in segments:
+        text = seg.text.strip()
+        if not text:
+            continue
+        label = _LABELS.get(seg.speaker, {}).get(locale)
+        if label is None:
+            label = seg.speaker or "?"
+        lines.append(f"{label}: {text}")
+    return "\n".join(lines)
