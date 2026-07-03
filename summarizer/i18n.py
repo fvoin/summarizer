@@ -112,6 +112,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "context_limit_label":      {"en": "Context Limit:",                      "ru": "Лимит контекста:"},
     "silence_timeout_label":    {"en": "Silence Timeout:",                    "ru": "Таймаут тишины:"},
     "input_device_label":       {"en": "Input Device:",                       "ru": "Устройство ввода:"},
+    "input_device_default":     {"en": "System default",                      "ru": "Системный по умолчанию"},
     "device_default":           {"en": "Default",                             "ru": "По умолчанию"},
     "save_audio_label":         {"en": "Save Audio:",                         "ru": "Сохранять аудио:"},
     "save_audio_check":         {"en": "Save recorded audio files to recordings dir",
