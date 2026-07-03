@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import difflib
 import re
+import statistics
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +21,7 @@ class Segment:
     end: float
     text: str
     speaker: str = ""  # "" | "me" | "remote"
+    energy: float = 0.0  # RMS amplitude of the segment (mic segments only)
 
 
 _PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
@@ -57,6 +59,7 @@ def merge(
     sys_segments: list,
     offset: float = 0.0,
     similarity_threshold: float = 0.6,
+    energy_ratio: float = 0.4,
 ) -> list:
     result = []
 
@@ -66,18 +69,35 @@ def merge(
             Segment(s.start + offset, s.end + offset, s.text, speaker="remote")
         )
 
+    # Energy baseline: the RMS of confident-local mic speech (windows where the
+    # remote is silent). Remote voice bleeding into the mic through speakers is
+    # much quieter than the local speaker, so segments far below this baseline
+    # are echo even when their (garbled) transcription doesn't match the system
+    # text. Disabled (baseline 0) when no energies were annotated.
+    local_energies = [
+        m.energy
+        for m in mic_segments
+        if m.energy > 0.0
+        and not _overlapping_sys_text(m.start, m.end, sys_segments, offset)
+    ]
+    baseline = statistics.median(local_energies) if local_energies else 0.0
+
     # Classify each mic segment.
     for m in mic_segments:
         sys_text = _overlapping_sys_text(m.start, m.end, sys_segments, offset)
         if not sys_text:
             # Remote silent in this window -> definitely local.
-            result.append(Segment(m.start, m.end, m.text, speaker="me"))
+            result.append(Segment(m.start, m.end, m.text, speaker="me", energy=m.energy))
             continue
         if _similarity(m.text, sys_text) >= similarity_threshold:
             # Echo of the remote voice -> already covered by the Remote track.
             continue
-        # System active but text differs -> double-talk, local spoke over remote.
-        result.append(Segment(m.start, m.end, m.text, speaker="me"))
+        # System active but text differs. If this mic segment is much quieter
+        # than local speech, it's remote echo that transcribed differently -> drop.
+        if baseline > 0.0 and m.energy > 0.0 and m.energy < energy_ratio * baseline:
+            continue
+        # Otherwise treat as genuine double-talk: local spoke over remote.
+        result.append(Segment(m.start, m.end, m.text, speaker="me", energy=m.energy))
 
     result.sort(key=lambda seg: seg.start)
     return result
@@ -127,6 +147,36 @@ def _envelope(samples, sr: int, target_hz: float = 100.0):
         return np.zeros(0)
     frames = x[:n].reshape(-1, win)
     return np.sqrt(np.mean(frames ** 2, axis=1))
+
+
+def rms_window(audio, sr: int, start: float, end: float) -> float:
+    """RMS amplitude of the audio between start and end seconds (mono or stereo)."""
+    a = np.asarray(audio, dtype=np.float64)
+    if a.ndim > 1:
+        a = a.mean(axis=1)  # down-mix to mono
+    i0 = max(0, int(start * sr))
+    i1 = min(len(a), int(end * sr))
+    if i1 <= i0:
+        return 0.0
+    seg = a[i0:i1]
+    return float(np.sqrt(np.mean(seg ** 2)))
+
+
+def annotate_energies(mic_path: str, segments: list) -> list:
+    """Best-effort: set .energy (RMS) on each mic segment from the mic WAV.
+
+    On any read error the segments keep energy 0.0, which disables energy
+    gating in merge() (falls back to text-only behavior).
+    """
+    try:
+        import soundfile as sf
+
+        audio, sr = sf.read(mic_path)
+        for s in segments:
+            s.energy = rms_window(audio, sr, s.start, s.end)
+    except Exception:
+        pass
+    return segments
 
 
 def estimate_offset(mic_path: str, sys_path: str, max_offset_sec: float = 5.0) -> float:

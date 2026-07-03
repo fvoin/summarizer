@@ -60,6 +60,7 @@ class DiarizeTranscribeWorker(QThread):
             tr = Transcriber(self._model)
             mic_segs = tr.transcribe_segments(self._mic_path)
             sys_segs = tr.transcribe_segments(self._sys_path)
+            diarize.annotate_energies(self._mic_path, mic_segs)
             offset = diarize.estimate_offset(self._mic_path, self._sys_path)
             merged = diarize.merge(mic_segs, sys_segs, offset=offset)
             text = diarize.format_transcript(merged, locale=locale())

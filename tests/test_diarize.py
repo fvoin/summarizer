@@ -145,3 +145,57 @@ def test_offset_clamped():
     sys_env = np.zeros(100)  # no correlation
     off = _offset_from_envelopes(mic_env, sys_env, hz=100.0, max_offset_sec=1.0)
     assert -1.0 <= off <= 1.0
+
+
+# ── energy-gating (echo suppression via mic amplitude) ────────────────────
+
+def test_rms_window_basic():
+    import numpy as np
+    from summarizer.diarize import rms_window
+    sr = 100
+    audio = np.zeros(200, dtype=float)
+    audio[100:200] = 1.0  # second half amplitude 1.0
+    assert rms_window(audio, sr, 0.0, 1.0) == 0.0          # first half: silence
+    assert abs(rms_window(audio, sr, 1.0, 2.0) - 1.0) < 1e-9  # second half: RMS 1.0
+
+
+def test_rms_window_empty_range_is_zero():
+    import numpy as np
+    from summarizer.diarize import rms_window
+    assert rms_window(np.ones(100, dtype=float), 100, 1.0, 1.0) == 0.0
+
+
+def test_merge_energy_gating_drops_quiet_echo():
+    # A quiet mic segment overlapping active system audio, with mismatched text,
+    # is remote echo bleeding through the speakers -> dropped.
+    mic = [
+        Segment(0.0, 1.0, "loud local speech here", energy=1.0),   # confident-local baseline
+        Segment(2.0, 3.0, "quiet echo of remote", energy=0.1),     # overlaps sys, low energy
+    ]
+    sys = [Segment(2.0, 3.0, "completely different remote words")]
+    out = merge(mic, sys, energy_ratio=0.4)
+    texts = [s.text for s in out]
+    assert "quiet echo of remote" not in texts          # echo dropped
+    assert "loud local speech here" in texts            # local kept
+    assert [s.speaker for s in out].count("remote") == 1
+
+
+def test_merge_energy_gating_keeps_loud_double_talk():
+    # A loud mic segment overlapping active system audio is genuine double-talk.
+    mic = [
+        Segment(0.0, 1.0, "loud local baseline", energy=1.0),
+        Segment(2.0, 3.0, "genuine interjection over them", energy=0.9),
+    ]
+    sys = [Segment(2.0, 3.0, "remote talking here")]
+    out = merge(mic, sys, energy_ratio=0.4)
+    texts = [s.text for s in out]
+    assert "genuine interjection over them" in texts     # kept as Me
+
+
+def test_merge_energy_gating_disabled_without_baseline():
+    # No confident-local segments -> no baseline -> gating off -> text-only behavior.
+    mic = [Segment(2.0, 3.0, "quiet overlapping", energy=0.1)]
+    sys = [Segment(2.0, 3.0, "remote words")]
+    out = merge(mic, sys, energy_ratio=0.4)
+    texts = [s.text for s in out]
+    assert "quiet overlapping" in texts                  # kept (no baseline to gate against)
