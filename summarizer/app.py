@@ -3538,6 +3538,11 @@ class MainWindow(QMainWindow):
             worker.start()
             return
 
+        # Single stream: the retained source files won't be used for diarization — free them now.
+        if self._diar_recorder:
+            self._diar_recorder.cleanup_sources()
+            self._diar_recorder = None
+
         self._pending_audio_path = audio_file
         self._pending_duration = duration
 
