@@ -4,15 +4,16 @@
 
 **Depends on:** `2026-07-03-speaker-separation.md` (the `diarize` module, `Transcriber.transcribe_segments`, recorder source files, and `DiarizeTranscribeWorker` must exist first).
 
-**Goal:** Ship a second app bundle ("Summarizer Transcriber") that records, transcribes locally with Me/Remote tagging, uploads the transcript for agent-scheduled meetings, and shows it with a Copy button for manual recordings — with no summarization, history, grouping, context, or LLM settings.
+**Goal:** Ship a second app bundle ("Summarizer Transcriber") that records, shows a live transcript while recording, transcribes locally with Me/Remote tagging on stop, uploads the transcript for agent-scheduled meetings, and shows it with a Copy button for manual recordings — with no summarization, history, grouping, context, or LLM settings.
 
-**Architecture:** One codebase, two bundles (Option A). The transcription `QThread` workers move from `app.py` into a neutral `summarizer/workers.py` that never imports `summarizer.summarizer` or `summarizer.db`. A new `app_lite.py` (`LiteWindow` + `LiteSetupWizard`) and `run_lite.py` entry point reuse `recorder`, `workers`, `diarize`, `agent`, `config`, `i18n`, `theme`, and a shared `widgets.py`. `build.sh` gains a lite target.
+**Architecture:** One codebase, two bundles (Option A). The transcription `QThread` workers move from `app.py` into a neutral `summarizer/workers.py` that never imports `summarizer.summarizer` or `summarizer.db`. A shared `LiveTranscriber` controller (also in `workers.py`) encapsulates the real-time-transcript orchestration so the lite window reuses it instead of duplicating `MainWindow`'s logic. A new `app_lite.py` (`LiteWindow` + `LiteSetupWizard`) and `run_lite.py` entry point reuse `recorder`, `workers`, `diarize`, `agent`, `config`, `i18n`, `theme`, and a shared `widgets.py`. `build.sh` gains a lite target.
 
 **Tech Stack:** PyQt6 (existing), plus the existing `recorder`/`transcriber`/`diarize`/`agent`/`config`/`i18n`/`theme` modules.
 
 ## Global Constraints
 
 - `app_lite.py`, `run_lite.py`, `workers.py`, and `widgets.py` MUST NOT import `summarizer.summarizer` or `summarizer.db` (keeps the LLM SDKs and history layer out of the lite bundle). (Spec: architecture, exclusions.)
+- `MainWindow`'s existing recording flow in `app.py` MUST NOT be modified by this plan — the shared `LiveTranscriber` controller is used only by the lite window for now. (User decision: don't destabilize the shipping full app.)
 - Manual recordings never upload — they display + copy only. Only agent-armed recordings upload, via the existing `agent.post_complete` / `PostCompleteWorker`. (User decision.)
 - Lite reuses the same `~/.summarizer/config.json`; it reads only `agent_url`, `agent_token`, `agent_enabled`, `whisper_model`, `input_device`. No config schema change. (Spec: config.)
 - Whisper model is hard-coded to the app default in lite setup (`config.DEFAULT_CONFIG["whisper_model"]`); no model picker in the lite wizard. (Spec: lite setup.)
@@ -28,7 +29,7 @@
 - Test: `tests/test_workers_isolation.py`
 
 **Interfaces:**
-- Produces `summarizer/workers.py` exporting `TranscribeWorker`, `RealtimeTranscribeWorker`, `_DeltaTranscribeWorker`, `DiarizeTranscribeWorker` — moved verbatim from `app.py` (signatures unchanged; see the speaker-separation plan for `DiarizeTranscribeWorker(whisper_model, mic_path, sys_path)`).
+- Produces `summarizer/workers.py` exporting `TranscribeWorker`, `RealtimeTranscribeWorker`, `_DeltaTranscribeWorker`, `DiarizeTranscribeWorker` — moved verbatim from `app.py` (signatures unchanged; `DiarizeTranscribeWorker(whisper_model, mic_path, sys_path)`).
 - `app.py` re-imports them so existing references keep working.
 
 - [ ] **Step 1: Write the isolation test**
@@ -40,7 +41,6 @@ import sys
 
 
 def test_importing_workers_does_not_load_summarizer_or_db():
-    # Drop any pre-import so the check is meaningful.
     for mod in ("summarizer.summarizer", "summarizer.db"):
         sys.modules.pop(mod, None)
     import summarizer.workers  # noqa: F401
@@ -57,7 +57,7 @@ def test_workers_exports_expected_classes():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_workers_isolation.py -v`
+Run: `.venv/bin/python -m pytest tests/test_workers_isolation.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'summarizer.workers'`
 
 - [ ] **Step 3: Create `workers.py` and move the classes**
@@ -88,6 +88,8 @@ _logger = logging.getLogger("workers")
 #     and DiarizeTranscribeWorker here, exactly as they were in app.py -->
 ```
 
+Note: `DiarizeTranscribeWorker.run()` uses `_logger` and does a lazy `from . import diarize` / `from .i18n import locale` — keep those lazy imports as-is; they resolve fine from `workers.py`.
+
 - [ ] **Step 4: Import them back in `app.py`**
 
 In `app.py`, delete the four class definitions you just moved. Near the other `from .` imports (after line 40), add:
@@ -105,8 +107,8 @@ from .workers import (
 
 Run:
 ```bash
-python -m pytest tests/test_workers_isolation.py -v
-python -c "import summarizer.app"
+.venv/bin/python -m pytest tests/test_workers_isolation.py -v
+.venv/bin/python -c "import summarizer.app"
 ```
 Expected: tests PASS; `import summarizer.app` exits 0 with no error.
 
@@ -115,7 +117,7 @@ Expected: tests PASS; `import summarizer.app` exits 0 with no error.
 ```bash
 source .venv/bin/activate && python run.py
 ```
-Record a few seconds, stop, confirm transcription still works (the workers now live in `workers.py`). Close.
+Record a few seconds, stop, confirm transcription still works (workers now live in `workers.py`). Close.
 
 - [ ] **Step 7: Commit**
 
@@ -126,7 +128,180 @@ git commit -m "refactor: extract transcription workers into workers.py"
 
 ---
 
-### Task 2: Shared `MicPicker` widget
+### Task 2: `LiveTranscriber` controller
+
+**Files:**
+- Modify: `summarizer/workers.py` (add `LiveTranscriber`)
+- Modify: `tests/test_workers_isolation.py` (extend the export assertion)
+- Test: `tests/test_live_transcriber.py`
+
+**Context:** In the full app, `MainWindow` drives the live transcript with a 10-second `QTimer` that slices the new audio delta (`get_all_rt_audio()[committed_len:]`) and pushes it to a `RealtimeTranscribeWorker`; `_on_rt_chunk(text, audio_len)` advances `committed_len` and appends the text. This task encapsulates exactly that orchestration into a reusable `LiveTranscriber` so the lite window reuses it instead of copying it. `MainWindow` is NOT changed.
+
+**Interfaces:**
+- Consumes: `RealtimeTranscribeWorker` (Task 1), a recorder exposing `get_all_rt_audio() -> np.ndarray | None`, `sample_rate: int`, `is_recording() -> bool`.
+- Produces: `summarizer.workers.LiveTranscriber(QObject)` with signal `text_appended = pyqtSignal(str)`, and methods `start(recorder, whisper_model: str) -> None`, `stop() -> None`. Internally uses a `QTimer` (10 s) and tracks `_committed_len`. On each tick it pushes the audio delta once it exceeds 3 s; on each chunk it advances `_committed_len` and emits non-empty text via `text_appended`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/test_live_transcriber.py` (this tests the pure bookkeeping via the chunk handler and the delta-gating on tick, using fakes — no real Qt event loop, model, or audio):
+
+```python
+import numpy as np
+import pytest
+
+pytest.importorskip("PyQt6.QtCore")
+from PyQt6.QtWidgets import QApplication
+from summarizer.workers import LiveTranscriber
+
+_app = QApplication.instance() or QApplication([])
+
+
+class _FakeWorker:
+    def __init__(self):
+        self.pushed = []
+
+    def push_audio(self, audio, sr):
+        self.pushed.append((len(audio), sr))
+
+
+class _FakeRecorder:
+    sample_rate = 100
+
+    def __init__(self, audio):
+        self._audio = audio
+
+    def get_all_rt_audio(self):
+        return self._audio
+
+    def is_recording(self):
+        return True
+
+
+def test_on_chunk_advances_committed_and_emits_text():
+    lt = LiveTranscriber()
+    seen = []
+    lt.text_appended.connect(seen.append)
+    lt._on_chunk("hello", 50)
+    lt._on_chunk("", 25)          # empty text: advance counter, emit nothing
+    assert lt._committed_len == 75
+    assert seen == ["hello"]
+
+
+def test_tick_pushes_only_when_delta_exceeds_min():
+    lt = LiveTranscriber()
+    lt._worker = _FakeWorker()
+    lt._sample_rate = 100          # min delta = 3 s = 300 samples
+    lt._committed_len = 0
+    # 250 samples of new audio -> below threshold, no push
+    lt._recorder = _FakeRecorder(np.zeros(250, dtype=np.float32))
+    lt._on_tick()
+    assert lt._worker.pushed == []
+    # 400 samples -> above threshold, one push of the full delta
+    lt._recorder = _FakeRecorder(np.zeros(400, dtype=np.float32))
+    lt._on_tick()
+    assert lt._worker.pushed == [(400, 100)]
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `.venv/bin/python -m pytest tests/test_live_transcriber.py -v`
+Expected: FAIL with `ImportError: cannot import name 'LiveTranscriber'`
+
+- [ ] **Step 3: Implement `LiveTranscriber`**
+
+Add to `summarizer/workers.py` (extend the `PyQt6.QtCore` import to include `QObject` and `QTimer`):
+
+```python
+class LiveTranscriber(QObject):
+    """Drives real-time (untagged) transcription for display during recording.
+
+    Encapsulates the RealtimeTranscribeWorker + a poll timer + committed-sample
+    bookkeeping, so a window can show live text without duplicating the
+    orchestration. Emits text_appended(str) as new chunks arrive.
+    """
+    text_appended = pyqtSignal(str)
+
+    _POLL_MS = 10000
+    _MIN_DELTA_SEC = 3.0
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._recorder = None
+        self._worker = None
+        self._committed_len = 0
+        self._sample_rate = 44100
+        self._timer = QTimer(self)
+        self._timer.setInterval(self._POLL_MS)
+        self._timer.timeout.connect(self._on_tick)
+
+    def start(self, recorder, whisper_model: str):
+        self._recorder = recorder
+        self._committed_len = 0
+        self._sample_rate = getattr(recorder, "sample_rate", 44100)
+        self._worker = RealtimeTranscribeWorker(whisper_model)
+        self._worker.model_ready.connect(self._on_model_ready)
+        self._worker.chunk_ready.connect(self._on_chunk)
+        self._worker.error.connect(lambda e: _logger.warning("LiveTranscriber: %s", e))
+        self._worker.start()
+
+    def _on_model_ready(self):
+        if self._recorder is not None and self._recorder.is_recording():
+            self._timer.start()
+
+    def _on_tick(self):
+        try:
+            if self._recorder is None or self._worker is None:
+                return
+            all_audio = self._recorder.get_all_rt_audio()
+            if all_audio is None or len(all_audio) == 0:
+                return
+            delta = all_audio[self._committed_len:]
+            if len(delta) < self._sample_rate * self._MIN_DELTA_SEC:
+                return
+            self._worker.push_audio(delta, self._sample_rate)
+        except Exception:
+            _logger.exception("LiveTranscriber tick failed (recording continues)")
+
+    def _on_chunk(self, text: str, audio_len: int):
+        self._committed_len += audio_len
+        if text:
+            self.text_appended.emit(text)
+
+    def stop(self):
+        self._timer.stop()
+        if self._worker is not None:
+            try:
+                self._worker.chunk_ready.disconnect(self._on_chunk)
+            except (TypeError, RuntimeError):
+                pass
+            if self._worker.isRunning():
+                self._worker.request_stop()
+        self._worker = None
+        self._recorder = None
+```
+
+- [ ] **Step 4: Extend the isolation export test**
+
+In `tests/test_workers_isolation.py`, add `"LiveTranscriber"` to the tuple of names checked in `test_workers_exports_expected_classes`.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run:
+```bash
+.venv/bin/python -m pytest tests/test_live_transcriber.py tests/test_workers_isolation.py -v
+```
+Expected: PASS (all).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add summarizer/workers.py tests/test_live_transcriber.py tests/test_workers_isolation.py
+git commit -m "feat: add reusable LiveTranscriber controller"
+```
+
+---
+
+### Task 3: Shared `MicPicker` widget
 
 **Files:**
 - Create: `summarizer/widgets.py`
@@ -171,7 +346,7 @@ def test_micpicker_preselects_saved(monkeypatch):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest tests/test_widgets.py -v`
+Run: `.venv/bin/python -m pytest tests/test_widgets.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'summarizer.widgets'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -219,7 +394,7 @@ In `summarizer/i18n.py`, add to the `_STRINGS` dict:
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `python -m pytest tests/test_widgets.py -v`
+Run: `.venv/bin/python -m pytest tests/test_widgets.py -v`
 Expected: PASS (2 passed)
 
 - [ ] **Step 6: Commit**
@@ -231,22 +406,22 @@ git commit -m "feat: add shared MicPicker widget"
 
 ---
 
-### Task 3: `LiteWindow` — record, transcribe, copy
+### Task 4: `LiteWindow` — record, live transcript, tag, copy
 
 **Files:**
 - Create: `summarizer/app_lite.py`
 - Test: manual (GUI + audio)
 
 **Interfaces:**
-- Consumes: `AudioRecorder`, `workers.RealtimeTranscribeWorker`, `workers.DiarizeTranscribeWorker`, `widgets.MicPicker`, `config`, `i18n.t`, `theme`.
-- Produces: `LiteWindow(QMainWindow)` with a Record/Stop button, elapsed timer, a read-only transcript view, a Copy button, and a status line. On stop: if both source streams exist → `DiarizeTranscribeWorker`; else → plain `Transcriber.transcribe(mixed)`. Manual recordings display + copy only.
+- Consumes: `AudioRecorder`, `workers.LiveTranscriber`, `workers.DiarizeTranscribeWorker`, `workers.TranscribeWorker`, `widgets.MicPicker`, `config`, `i18n.t`, `theme`.
+- Produces: `LiteWindow(QMainWindow)` with a Record/Stop button, elapsed timer, a read-only transcript view, a Copy button, and a status line. While recording it shows a live untagged transcript via `LiveTranscriber`. On stop: if both source streams exist → `DiarizeTranscribeWorker` (replaces the live text with the Me/Remote tagged version); else → plain `TranscribeWorker(mixed)`. Manual recordings display + copy only. `_handle_result(text)` is a hook overridden in Task 5 for agent upload.
 
 - [ ] **Step 1: Implement the window**
 
 Create `summarizer/app_lite.py`:
 
 ```python
-"""Lite transcript client: record -> local transcribe (Me/Remote) -> copy/upload.
+"""Lite transcript client: record -> live transcript -> Me/Remote tag -> copy/upload.
 
 Never imports summarizer.summarizer or summarizer.db.
 """
@@ -255,10 +430,9 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 
-from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QPlainTextEdit, QLabel,
@@ -267,8 +441,7 @@ from PyQt6.QtWidgets import (
 from . import config, theme
 from .i18n import t
 from .recorder import AudioRecorder
-from .transcriber import Transcriber
-from .workers import DiarizeTranscribeWorker
+from .workers import LiveTranscriber, DiarizeTranscribeWorker, TranscribeWorker
 
 _logger = logging.getLogger("app_lite")
 
@@ -280,6 +453,7 @@ class LiteWindow(QMainWindow):
         self._recorder = None
         self._diar_recorder = None
         self._start_ts = None
+        self._last_duration = 0
         self._workers = []
 
         central = QWidget()
@@ -310,6 +484,9 @@ class LiteWindow(QMainWindow):
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
 
+        self._live = LiveTranscriber(self)
+        self._live.text_appended.connect(self._append_live)
+
     # ── recording ────────────────────────────────────────────────
     def _toggle(self):
         if self._recorder and self._recorder.is_recording():
@@ -331,6 +508,15 @@ class LiteWindow(QMainWindow):
         self.record_btn.setStyleSheet(theme.btn_recording())
         self.status.setText(t("status_recording"))
         self._timer.start()
+        wm = cfg.get("whisper_model", config.DEFAULT_CONFIG["whisper_model"])
+        self._live.start(self._recorder, wm)
+
+    def _append_live(self, text: str):
+        current = self.transcript.toPlainText()
+        sep = " " if current else ""
+        self.transcript.setPlainText(current + sep + text)
+        sb = self.transcript.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def _tick(self):
         if self._start_ts is None:
@@ -340,6 +526,7 @@ class LiteWindow(QMainWindow):
 
     def _stop(self):
         self._timer.stop()
+        self._live.stop()
         self.record_btn.setText(t("start_recording"))
         self.record_btn.setStyleSheet(theme.btn_primary())
         duration = int(time.monotonic() - self._start_ts) if self._start_ts else 0
@@ -352,6 +539,7 @@ class LiteWindow(QMainWindow):
         self._last_duration = duration
 
         if not mixed:
+            self._cleanup_sources()
             self.status.setText(t("status_recording_failed"))
             return
 
@@ -370,7 +558,6 @@ class LiteWindow(QMainWindow):
             self._plain_transcribe(mixed, wm)
 
     def _plain_transcribe(self, mixed, wm):
-        from .workers import TranscribeWorker
         worker = TranscribeWorker(mixed, wm)
         worker.finished.connect(self._on_transcript)
         worker.error.connect(lambda e: self.status.setText(t("lite_error", err=e)))
@@ -386,10 +573,10 @@ class LiteWindow(QMainWindow):
         self.transcript.setPlainText(text)
         self.copy_btn.setEnabled(bool(text.strip()))
         self.status.setText(t("lite_done"))
-        self._handle_result(text)  # overridden in Task 4 for agent upload
+        self._handle_result(text)  # overridden in Task 5 for agent upload
 
     def _handle_result(self, text: str):
-        """Manual recording: nothing more to do (copy only). Overridden in Task 4."""
+        """Manual recording: nothing more to do (copy only). Overridden in Task 5."""
         pass
 
     def _cleanup_sources(self):
@@ -403,7 +590,9 @@ class LiteWindow(QMainWindow):
 
     def _track(self, worker):
         self._workers.append(worker)
-        worker.finished.connect(lambda *_: self._workers.remove(worker) if worker in self._workers else None)
+        worker.finished.connect(
+            lambda *_: self._workers.remove(worker) if worker in self._workers else None
+        )
 
 
 def main():
@@ -425,8 +614,8 @@ In `summarizer/i18n.py` `_STRINGS`, add:
 ```python
     "lite_title": {"en": "Summarizer Transcriber", "ru": "Summarizer Транскрибатор"},
     "lite_ready": {"en": "Ready", "ru": "Готово"},
-    "lite_placeholder": {"en": "Transcript will appear here after recording.",
-                          "ru": "Транскрипт появится здесь после записи."},
+    "lite_placeholder": {"en": "Transcript will appear here.",
+                          "ru": "Транскрипт появится здесь."},
     "lite_copy": {"en": "Copy transcript", "ru": "Копировать транскрипт"},
     "lite_copied": {"en": "Copied to clipboard", "ru": "Скопировано в буфер обмена"},
     "lite_done": {"en": "Transcript ready", "ru": "Транскрипт готов"},
@@ -435,7 +624,7 @@ In `summarizer/i18n.py` `_STRINGS`, add:
 
 - [ ] **Step 3: Verify `theme.apply` exists**
 
-Run: `python -c "from summarizer import theme; print(hasattr(theme, 'apply'))"`
+Run: `.venv/bin/python -c "from summarizer import theme; print(hasattr(theme, 'apply'))"`
 Expected: `True`. If it prints `False`, open `summarizer/theme.py`, find the actual app-styling entry point (e.g. `apply_theme` / `set_palette`), and use that name in `main()` instead of `theme.apply`.
 
 - [ ] **Step 4: Manual verification**
@@ -443,19 +632,19 @@ Expected: `True`. If it prints `False`, open `summarizer/theme.py`, find the act
 ```bash
 source .venv/bin/activate && python -c "from summarizer.app_lite import main; main()"
 ```
-- Record a few seconds with system audio playing + speaking → Stop → transcript shows `Me:`/`Remote:` tags → Copy enables and copies.
+- Record a few seconds with system audio playing + speaking → a live untagged transcript streams in → Stop → transcript is replaced with `Me:`/`Remote:` tags → Copy enables and copies.
 - Confirm no summarization/history UI is present.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add summarizer/app_lite.py summarizer/i18n.py
-git commit -m "feat: add LiteWindow record/transcribe/copy"
+git commit -m "feat: add LiteWindow with live transcript, tagging, copy"
 ```
 
 ---
 
-### Task 4: Agent polling + upload in lite
+### Task 5: Agent polling + upload in lite
 
 **Files:**
 - Modify: `summarizer/app_lite.py`
@@ -467,7 +656,7 @@ git commit -m "feat: add LiteWindow record/transcribe/copy"
 
 - [ ] **Step 1: Wire the poller and auto-record**
 
-In `LiteWindow.__init__`, after building the UI, add:
+In `LiteWindow.__init__`, after building the UI and the `LiveTranscriber`, add:
 
 ```python
         self._agent_meeting = None
@@ -495,7 +684,7 @@ Add the armed-meeting handler:
 
 - [ ] **Step 2: Upload on transcript-ready for agent recordings**
 
-Replace the `_handle_result` stub from Task 3 with:
+Replace the `_handle_result` stub from Task 4 with:
 
 ```python
     def _handle_result(self, text: str):
@@ -503,7 +692,7 @@ Replace the `_handle_result` stub from Task 3 with:
         self._agent_meeting = None
         if not meeting:
             return  # manual recording: copy only
-        meeting["_duration"] = getattr(self, "_last_duration", 0)
+        meeting["_duration"] = self._last_duration
         from .agent import PostCompleteWorker
         worker = PostCompleteWorker(text, meeting)
         worker.finished.connect(lambda _r: self.status.setText(t("lite_uploaded")))
@@ -550,7 +739,7 @@ git commit -m "feat: agent auto-record and upload in lite client"
 
 ---
 
-### Task 5: `LiteSetupWizard` — mic + backend
+### Task 6: `LiteSetupWizard` — mic + backend
 
 **Files:**
 - Modify: `summarizer/app_lite.py`
@@ -562,7 +751,7 @@ git commit -m "feat: agent auto-record and upload in lite client"
 
 - [ ] **Step 1: Implement the wizard**
 
-Add to `summarizer/app_lite.py` (imports: `QDialog`, `QLineEdit`, `QProgressBar`, `QStackedWidget`, `QFormLayout` from `PyQt6.QtWidgets`; `download_model` from `.transcriber`; `MicPicker` from `.widgets`):
+Add to `summarizer/app_lite.py` (extend imports: add `QDialog, QLineEdit, QProgressBar, QStackedWidget, QFormLayout` to the `PyQt6.QtWidgets` import; add `QThread, pyqtSignal` to the `PyQt6.QtCore` import; add `from .transcriber import download_model` and `from .widgets import MicPicker`):
 
 ```python
 class LiteSetupWizard(QDialog):
@@ -650,11 +839,9 @@ def should_run_setup() -> bool:
     return not cfg.get("agent_url") or not config.is_model_downloaded(model)
 ```
 
-Add `QThread, pyqtSignal` to the `PyQt6.QtCore` import at the top of `app_lite.py`.
-
 - [ ] **Step 2: Run the wizard before the window in `main()`**
 
-Update `main()` in `app_lite.py` so setup runs first when needed:
+Update `main()` in `app_lite.py` so setup runs first when needed (add `QDialog` to the `PyQt6.QtWidgets` import if not already there):
 
 ```python
 def main():
@@ -672,8 +859,6 @@ def main():
     win.show()
     sys.exit(app.exec())
 ```
-
-(Add `QDialog` to the `PyQt6.QtWidgets` import.)
 
 - [ ] **Step 3: Add i18n strings**
 
@@ -693,8 +878,8 @@ In `summarizer/i18n.py` `_STRINGS`, add:
 
 Run:
 ```bash
-python -c "from summarizer import config; print(hasattr(config,'save'), hasattr(config,'is_model_downloaded'), 'whisper_model' in config.DEFAULT_CONFIG)"
-python -c "import inspect, summarizer.transcriber as t; print(inspect.signature(t.download_model))"
+.venv/bin/python -c "from summarizer import config; print(hasattr(config,'save'), hasattr(config,'is_model_downloaded'), 'whisper_model' in config.DEFAULT_CONFIG)"
+.venv/bin/python -c "import inspect, summarizer.transcriber as t; print(inspect.signature(t.download_model))"
 ```
 Expected: `True True True`, and `download_model(model_name, progress_cb=None)`. If `config.save` is named differently (e.g. `config.write`/`config.dump`), use that name in `_to_download`. If `DEFAULT_CONFIG` is spelled differently, grep `config.py` for the defaults dict and use the correct name.
 
@@ -711,7 +896,7 @@ git commit -m "feat: add LiteSetupWizard (mic + backend + model)"
 
 ---
 
-### Task 6: `run_lite.py` entry point
+### Task 7: `run_lite.py` entry point
 
 **Files:**
 - Create: `run_lite.py`
@@ -737,7 +922,7 @@ if __name__ == "__main__":
 ```bash
 source .venv/bin/activate && python run_lite.py
 ```
-Expected: the lite window (or setup wizard) launches; recording + transcription work end to end.
+Expected: the lite window (or setup wizard) launches; recording + live transcript + tagging work end to end.
 
 - [ ] **Step 3: Commit**
 
@@ -748,7 +933,7 @@ git commit -m "feat: add run_lite.py entry point"
 
 ---
 
-### Task 7: `build.sh` lite target
+### Task 8: `build.sh` lite target
 
 **Files:**
 - Modify: `build.sh`
@@ -778,7 +963,7 @@ else
 fi
 ```
 
-Then replace the hard-coded app name, entry script, and bundle id in the PyInstaller call and DMG steps with `"$APP_NAME"`, `"$ENTRY"`, and `"$BUNDLE_ID"` (match the real variable/flag names found in Step 1; keep every other flag identical). Ensure `--hidden-import summarizer.app_lite` and `--hidden-import summarizer.workers` and `--hidden-import summarizer.diarize` are collected for the lite entry (PyInstaller follows imports, but add them explicitly if the build warns).
+Then replace the hard-coded app name, entry script, and bundle id in the PyInstaller call and DMG steps with `"$APP_NAME"`, `"$ENTRY"`, and `"$BUNDLE_ID"` (match the real variable/flag names found in Step 1; keep every other flag identical). Ensure `--hidden-import summarizer.app_lite`, `--hidden-import summarizer.workers`, `--hidden-import summarizer.widgets`, and `--hidden-import summarizer.diarize` are collected for the lite entry (PyInstaller follows imports, but add them explicitly if the build warns).
 
 - [ ] **Step 3: Build the lite bundle**
 
@@ -790,7 +975,7 @@ Expected: `dist/Summarizer Transcriber.app` and a corresponding DMG are produced
 ```bash
 open "dist/Summarizer Transcriber.app"
 ```
-Expected: the lite app launches (setup wizard on first run), records, transcribes with Me/Remote tags, and copies. Confirm the full build still works: `./build.sh` (no arg) → `dist/Summarizer.app`.
+Expected: the lite app launches (setup wizard on first run), records, shows a live transcript, tags Me/Remote on stop, and copies. Confirm the full build still works: `./build.sh` (no arg) → `dist/Summarizer.app`.
 
 - [ ] **Step 5: Commit**
 
@@ -803,7 +988,7 @@ git commit -m "feat: add lite build target to build.sh"
 
 ## Self-Review Notes
 
-- **Spec coverage:** separate entry point (Tasks 3–6), no `summarizer`/`db` imports (Task 1 isolation test guards it), shared `MicPicker` (Task 2), agent-upload reuse + manual copy-only (Task 4), 3-step wizard with hard-coded model (Task 5), two bundles from one codebase (Task 7).
-- **Live untagged transcript during recording** (spec Section B) is intentionally deferred: reusing the full app's RT tick/commit loop would duplicate fragile state. Lite v1 shows an elapsed timer while recording and the tagged transcript on stop. Revisit if live feedback proves necessary. **(Flag for user — deviates from spec Section B.)**
-- **Signature verification steps** (Tasks 3/5) exist because `theme.apply`, `config.save`, and the defaults-dict name were not confirmed while writing this plan; the engineer verifies and adjusts to the real names before proceeding.
+- **Spec coverage:** separate entry point (Tasks 4–7), no `summarizer`/`db` imports (Task 1 isolation test guards it), shared `LiveTranscriber` (Task 2) and `MicPicker` (Task 3), live transcript during recording (Task 4), agent-upload reuse + manual copy-only (Task 5), 3-step wizard with hard-coded model (Task 6), two bundles from one codebase (Task 8).
+- **Live transcript reuse:** `MainWindow` is intentionally left untouched (global constraint); the lite window reuses the RT orchestration through the shared `LiveTranscriber` controller rather than duplicating it. Migrating the full app onto the same controller is a possible later step, out of scope here.
+- **Signature verification steps** (Tasks 4/6) exist because `theme.apply`, `config.save`, and the defaults-dict name were not confirmed while writing this plan; the engineer verifies and adjusts to the real names before proceeding.
 - **`_track` cleanup** keeps QThread references alive until they finish, preventing premature GC of running workers.
