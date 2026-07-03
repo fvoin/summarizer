@@ -3650,6 +3650,9 @@ class MainWindow(QMainWindow):
         self._reset_record_btn()
 
         if not audio_file:
+            if self._diar_recorder:
+                self._diar_recorder.cleanup_sources()
+                self._diar_recorder = None
             _logger.warning("Recording stopped but no audio captured")
             self._set_status(t("status_recording_failed"), "error")
             return
