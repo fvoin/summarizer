@@ -16,7 +16,7 @@
 - `MainWindow`'s existing recording flow in `app.py` MUST NOT be modified by this plan — the shared `LiveTranscriber` controller is used only by the lite window for now. (User decision: don't destabilize the shipping full app.)
 - Manual recordings never upload — they display + copy only. Only agent-armed recordings upload, via the existing `agent.post_complete` / `PostCompleteWorker`. (User decision.)
 - Lite reuses the same `~/.summarizer/config.json`; it reads only `agent_url`, `agent_token`, `agent_enabled`, `whisper_model`, `input_device`. No config schema change. (Spec: config.)
-- Whisper model is hard-coded to the app default in lite setup (`config.DEFAULT_CONFIG["whisper_model"]`); no model picker in the lite wizard. (Spec: lite setup.)
+- Whisper model is hard-coded to the app default (`"base"`, from `config._DEFAULTS`, which `config.load()` already merges) in lite setup; no model picker in the lite wizard. (Spec: lite setup.)
 - Speaker tagging reuses `diarize` exactly as the full app does. (Spec: shared.)
 
 ---
@@ -508,7 +508,7 @@ class LiteWindow(QMainWindow):
         self.record_btn.setStyleSheet(theme.btn_recording())
         self.status.setText(t("status_recording"))
         self._timer.start()
-        wm = cfg.get("whisper_model", config.DEFAULT_CONFIG["whisper_model"])
+        wm = cfg.get("whisper_model", "base")
         self._live.start(self._recorder, wm)
 
     def _append_live(self, text: str):
@@ -545,7 +545,7 @@ class LiteWindow(QMainWindow):
 
         self.status.setText(t("status_transcribing"))
         cfg = config.load()
-        wm = cfg.get("whisper_model", config.DEFAULT_CONFIG["whisper_model"])
+        wm = cfg.get("whisper_model", "base")
         mic = sources.get("mic") or []
         sysf = sources.get("system")
         if mic and sysf:
@@ -601,7 +601,7 @@ def main():
 
     logging.basicConfig(level=logging.INFO)
     app = QApplication(sys.argv)
-    theme.apply(app)
+    theme.apply_palette(app)
     win = LiteWindow()
     win.show()
     sys.exit(app.exec())
@@ -622,10 +622,10 @@ In `summarizer/i18n.py` `_STRINGS`, add:
     "lite_error": {"en": "Transcription failed: {err}", "ru": "Ошибка транскрипции: {err}"},
 ```
 
-- [ ] **Step 3: Verify `theme.apply` exists**
+- [ ] **Step 3: Sanity-check the styling call**
 
-Run: `.venv/bin/python -c "from summarizer import theme; print(hasattr(theme, 'apply'))"`
-Expected: `True`. If it prints `False`, open `summarizer/theme.py`, find the actual app-styling entry point (e.g. `apply_theme` / `set_palette`), and use that name in `main()` instead of `theme.apply`.
+Run: `.venv/bin/python -c "from summarizer import theme; print(hasattr(theme, 'apply_palette'))"`
+Expected: `True` (confirmed present). `theme.apply_palette(app)` styles the QApplication. NOTE: `theme.apply(name)` is a *different* function that sets a theme name — do NOT use it here.
 
 - [ ] **Step 4: Manual verification**
 
@@ -759,7 +759,7 @@ class LiteSetupWizard(QDialog):
         super().__init__(parent)
         self.setWindowTitle(t("lite_setup_title"))
         self._cfg = config.load()
-        self._model = config.DEFAULT_CONFIG["whisper_model"]
+        self._model = self._cfg.get("whisper_model", "base")
 
         self._stack = QStackedWidget()
         lay = QVBoxLayout(self)
@@ -835,7 +835,7 @@ class _LiteModelDownloadWorker(QThread):
 
 def should_run_setup() -> bool:
     cfg = config.load()
-    model = config.DEFAULT_CONFIG["whisper_model"]
+    model = cfg.get("whisper_model", "base")
     return not cfg.get("agent_url") or not config.is_model_downloaded(model)
 ```
 
@@ -850,7 +850,7 @@ def main():
 
     logging.basicConfig(level=logging.INFO)
     app = QApplication(sys.argv)
-    theme.apply(app)
+    theme.apply_palette(app)
     if should_run_setup():
         wiz = LiteSetupWizard()
         if wiz.exec() != QDialog.DialogCode.Accepted:
@@ -878,10 +878,10 @@ In `summarizer/i18n.py` `_STRINGS`, add:
 
 Run:
 ```bash
-.venv/bin/python -c "from summarizer import config; print(hasattr(config,'save'), hasattr(config,'is_model_downloaded'), 'whisper_model' in config.DEFAULT_CONFIG)"
+.venv/bin/python -c "from summarizer import config; print(hasattr(config,'save'), hasattr(config,'is_model_downloaded'), config.load().get('whisper_model'))"
 .venv/bin/python -c "import inspect, summarizer.transcriber as t; print(inspect.signature(t.download_model))"
 ```
-Expected: `True True True`, and `download_model(model_name, progress_cb=None)`. If `config.save` is named differently (e.g. `config.write`/`config.dump`), use that name in `_to_download`. If `DEFAULT_CONFIG` is spelled differently, grep `config.py` for the defaults dict and use the correct name.
+Expected: `True True base`, and `download_model(model_name, progress_cb=None)`. (Confirmed: `config.save`, `config.is_model_downloaded` exist; `config.load()` always supplies `whisper_model` via the merged `_DEFAULTS`, so `cfg.get("whisper_model", "base")` is safe. There is no public `config.DEFAULT_CONFIG`.)
 
 - [ ] **Step 5: Manual verification**
 
