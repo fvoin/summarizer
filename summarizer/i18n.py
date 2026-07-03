@@ -372,6 +372,16 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "agent_notify_uploaded":    {"en": "Uploaded: {title}",                   "ru": "Загружено: {title}"},
     "agent_notify_noshow":      {"en": "No voice detected, skipped: {title}", "ru": "Голос не обнаружен, пропущено: {title}"},
     "agent_notify_error":       {"en": "Agent error: {error}",               "ru": "Ошибка агента: {error}"},
+
+    # ── Lite window ──────────────────────────────────────────────────────
+    "lite_title": {"en": "Summarizer Transcriber", "ru": "Summarizer Транскрибатор"},
+    "lite_ready": {"en": "Ready", "ru": "Готово"},
+    "lite_placeholder": {"en": "Transcript will appear here.",
+                          "ru": "Транскрипт появится здесь."},
+    "lite_copy": {"en": "Copy transcript", "ru": "Копировать транскрипт"},
+    "lite_copied": {"en": "Copied to clipboard", "ru": "Скопировано в буфер обмена"},
+    "lite_done": {"en": "Transcript ready", "ru": "Транскрипт готов"},
+    "lite_error": {"en": "Transcription failed: {err}", "ru": "Ошибка транскрипции: {err}"},
 }
 
 
