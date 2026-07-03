@@ -309,6 +309,37 @@ class TranscribeWorker(QThread):
             self.error.emit(str(e))
 
 
+class DiarizeTranscribeWorker(QThread):
+    """Post-recording Me/Remote speaker separation from the two source streams."""
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, whisper_model: str, mic_path: str, sys_path: str, parent=None):
+        super().__init__(parent)
+        self._model = whisper_model
+        self._mic_path = mic_path
+        self._sys_path = sys_path
+
+    def run(self):
+        try:
+            from . import diarize
+            from .i18n import locale
+
+            tr = Transcriber(self._model)
+            mic_segs = tr.transcribe_segments(self._mic_path)
+            sys_segs = tr.transcribe_segments(self._sys_path)
+            offset = diarize.estimate_offset(self._mic_path, self._sys_path)
+            merged = diarize.merge(mic_segs, sys_segs, offset=offset)
+            text = diarize.format_transcript(merged, locale=locale())
+            if not text.strip():
+                self.error.emit("empty")
+                return
+            self.finished.emit(text)
+        except Exception as e:
+            _logger.exception("DiarizeTranscribeWorker failed")
+            self.error.emit(str(e))
+
+
 class _ModelPreloadWorker(QThread):
     """Loads the configured Whisper model into the module-level cache at app start."""
     def __init__(self, model_name: str):
@@ -3613,6 +3644,8 @@ class MainWindow(QMainWindow):
         self._cleanup_rt()
 
         audio_file = self._recorder.stop()
+        sources = self._recorder.get_source_files()
+        self._diar_recorder = self._recorder  # kept only to cleanup_sources() later
         self._recorder = None
         self._reset_record_btn()
 
@@ -3633,6 +3666,23 @@ class MainWindow(QMainWindow):
                 shutil.copy2(audio_file, dest)
             except Exception:
                 pass
+
+        # Speaker separation: when both mic and system streams were captured,
+        # re-transcribe them separately and tag Me/Remote (post-recording).
+        mic_srcs = sources.get("mic") or []
+        sys_src = sources.get("system")
+        if mic_srcs and sys_src:
+            self._pending_audio_path = audio_file
+            self._pending_duration = duration
+            self._set_status(f"{status_prefix}{t('status_processing')}", "busy")
+            self.progress.setVisible(True)
+            self.record_btn.setEnabled(False)
+            worker = DiarizeTranscribeWorker(whisper_model, mic_srcs[0], sys_src)
+            worker.finished.connect(self._on_diarized)
+            worker.error.connect(self._on_diarize_failed)
+            self._track_worker(worker)
+            worker.start()
+            return
 
         self._pending_audio_path = audio_file
         self._pending_duration = duration
@@ -3725,6 +3775,30 @@ class MainWindow(QMainWindow):
             self._set_busy(True)
             self.result_text.clear()
             self._run_summarize(transcript, duration_seconds=duration)
+
+    def _on_diarized(self, transcript: str):
+        """Speaker-tagged transcript ready — route through the normal sink."""
+        rec = getattr(self, "_diar_recorder", None)
+        if rec:
+            rec.cleanup_sources()
+            self._diar_recorder = None
+        self._use_rt_transcript(transcript)
+
+    def _on_diarize_failed(self, _err: str):
+        """Diarization produced nothing usable — fall back to plain transcription."""
+        rec = getattr(self, "_diar_recorder", None)
+        if rec:
+            rec.cleanup_sources()
+            self._diar_recorder = None
+        audio = getattr(self, "_pending_audio_path", None)
+        duration = getattr(self, "_pending_duration", None)
+        self._pending_audio_path = None
+        self._pending_duration = None
+        if audio:
+            self._process_audio(audio, duration_seconds=duration)
+        else:
+            self._set_busy(False)
+            self._on_error(t("error_no_speech"))
 
     def _stop_recording(self):
         if not self._recorder:
