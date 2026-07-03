@@ -388,6 +388,15 @@ _STRINGS: Dict[str, Dict[str, str]] = {
                               "ru": "Автозапись: {title}"},
     "lite_uploaded": {"en": "Transcript uploaded", "ru": "Транскрипт загружен"},
     "lite_upload_failed": {"en": "Upload failed: {err}", "ru": "Ошибка загрузки: {err}"},
+
+    # ── Lite setup wizard ────────────────────────────────────────────────
+    "lite_setup_title": {"en": "Set up Transcriber", "ru": "Настройка Транскрибатора"},
+    "lite_setup_mic": {"en": "Choose your microphone. Grant mic access if prompted.",
+                        "ru": "Выберите микрофон. Разрешите доступ к микрофону при запросе."},
+    "lite_setup_url": {"en": "Backend URL", "ru": "URL бэкенда"},
+    "lite_setup_token": {"en": "Access token", "ru": "Токен доступа"},
+    "lite_setup_download": {"en": "Downloading the transcription model…",
+                             "ru": "Загрузка модели транскрипции…"},
 }
 
 
