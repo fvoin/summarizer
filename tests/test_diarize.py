@@ -115,3 +115,33 @@ def test_format_transcript_skips_blank_text():
     ]
     out = format_transcript(segs, locale="en")
     assert out == "Remote: real"
+
+
+import numpy as np
+from summarizer.diarize import _offset_from_envelopes
+
+
+def test_offset_zero_when_aligned():
+    rng = np.arange(100, dtype=float)
+    env = np.sin(rng / 3.0) ** 2
+    off = _offset_from_envelopes(env, env, hz=100.0)
+    assert abs(off) < 0.02
+
+
+def test_offset_detects_positive_lag():
+    # sys envelope is the mic envelope delayed by 50 samples (=0.5s at 100Hz).
+    rng = np.arange(300, dtype=float)
+    base = (np.sin(rng / 5.0) ** 2)
+    mic_env = base.copy()
+    sys_env = np.concatenate([np.zeros(50), base])[:300]
+    off = _offset_from_envelopes(mic_env, sys_env, hz=100.0)
+    # to align sys onto mic we must ADD +0.5s to sys timestamps
+    assert abs(off - 0.5) < 0.05
+
+
+def test_offset_clamped():
+    rng = np.arange(100, dtype=float)
+    mic_env = np.sin(rng / 3.0) ** 2
+    sys_env = np.zeros(100)  # no correlation
+    off = _offset_from_envelopes(mic_env, sys_env, hz=100.0, max_offset_sec=1.0)
+    assert -1.0 <= off <= 1.0

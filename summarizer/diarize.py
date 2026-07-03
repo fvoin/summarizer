@@ -11,6 +11,8 @@ import difflib
 import re
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
 class Segment:
@@ -98,3 +100,43 @@ def format_transcript(segments: list, locale: str = "en") -> str:
             label = seg.speaker or "?"
         lines.append(f"{label}: {text}")
     return "\n".join(lines)
+
+
+def _offset_from_envelopes(env_mic, env_sys, hz: float, max_offset_sec: float = 5.0) -> float:
+    a = np.asarray(env_mic, dtype=float)
+    b = np.asarray(env_sys, dtype=float)
+    if a.size == 0 or b.size == 0:
+        return 0.0
+    a = a - a.mean()
+    b = b - b.mean()
+    if not np.any(a) or not np.any(b):
+        return 0.0
+    corr = np.correlate(a, b, mode="full")
+    lag = (len(b) - 1) - int(np.argmax(corr))  # samples to shift sys forward
+    offset = lag / hz
+    return max(-max_offset_sec, min(max_offset_sec, offset))
+
+
+def _envelope(samples, sr: int, target_hz: float = 100.0):
+    x = np.asarray(samples, dtype=float)
+    if x.ndim > 1:
+        x = x.mean(axis=1)  # down-mix to mono
+    win = max(1, int(sr / target_hz))
+    n = (len(x) // win) * win
+    if n == 0:
+        return np.zeros(0)
+    frames = x[:n].reshape(-1, win)
+    return np.sqrt(np.mean(frames ** 2, axis=1))
+
+
+def estimate_offset(mic_path: str, sys_path: str, max_offset_sec: float = 5.0) -> float:
+    try:
+        import soundfile as sf
+
+        mic, sr_m = sf.read(mic_path)
+        sys_, sr_s = sf.read(sys_path)
+        env_m = _envelope(mic, sr_m, target_hz=100.0)
+        env_s = _envelope(sys_, sr_s, target_hz=100.0)
+        return _offset_from_envelopes(env_m, env_s, hz=100.0, max_offset_sec=max_offset_sec)
+    except Exception:
+        return 0.0
