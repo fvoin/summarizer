@@ -190,6 +190,7 @@ class LiveTranscriber(QObject):
         super().__init__(parent)
         self._recorder = None
         self._worker = None
+        self._retired = []  # running workers kept alive until they finish
         self._committed_len = 0
         self._sample_rate = 44100
         self._timer = QTimer(self)
@@ -231,12 +232,23 @@ class LiveTranscriber(QObject):
 
     def stop(self):
         self._timer.stop()
-        if self._worker is not None:
-            try:
-                self._worker.chunk_ready.disconnect(self._on_chunk)
-            except (TypeError, RuntimeError):
-                pass
-            if self._worker.isRunning():
-                self._worker.request_stop()
+        w = self._worker
         self._worker = None
         self._recorder = None
+        if w is None:
+            return
+        try:
+            w.chunk_ready.disconnect(self._on_chunk)
+        except (TypeError, RuntimeError):
+            pass
+        if w.isRunning():
+            # Destroying a running QThread aborts the process. request_stop()
+            # ends the worker's loop after its in-flight chunk finishes; keep a
+            # reference until finished() fires so it is never GC'd mid-run.
+            self._retired.append(w)
+            w.finished.connect(lambda: self._drop_retired(w))
+            w.request_stop()
+
+    def _drop_retired(self, worker):
+        if worker in self._retired:
+            self._retired.remove(worker)

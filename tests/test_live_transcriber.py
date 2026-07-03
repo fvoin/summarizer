@@ -52,3 +52,39 @@ def test_tick_pushes_only_when_delta_exceeds_min():
     lt._recorder = _FakeRecorder(np.zeros(400, dtype=np.float32))
     lt._on_tick()
     assert lt._worker.pushed == [(400, 100)]
+
+
+def test_stop_retains_running_worker_until_finished():
+    """A running RT worker must be kept referenced until finished() fires,
+    otherwise destroying the QThread mid-run aborts the process."""
+    class _FakeSignal:
+        def __init__(self):
+            self._cbs = []
+        def connect(self, cb):
+            self._cbs.append(cb)
+        def disconnect(self, *a):
+            pass
+        def emit(self):
+            for cb in list(self._cbs):
+                cb()
+
+    class _FakeThreadWorker:
+        def __init__(self):
+            self.chunk_ready = _FakeSignal()
+            self.finished = _FakeSignal()
+            self.stopped = False
+            self._running = True
+        def isRunning(self):
+            return self._running
+        def request_stop(self):
+            self.stopped = True
+
+    lt = LiveTranscriber()
+    w = _FakeThreadWorker()
+    lt._worker = w
+    lt.stop()
+    assert w.stopped is True          # asked to stop
+    assert w in lt._retired           # retained while still running
+    assert lt._worker is None
+    w.finished.emit()                 # thread actually finishes
+    assert w not in lt._retired       # reference released
