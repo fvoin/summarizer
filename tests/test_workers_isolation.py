@@ -12,5 +12,5 @@ def test_importing_workers_does_not_load_summarizer_or_db():
 def test_workers_exports_expected_classes():
     import summarizer.workers as w
     for name in ("TranscribeWorker", "RealtimeTranscribeWorker",
-                 "_DeltaTranscribeWorker", "DiarizeTranscribeWorker"):
+                 "_DeltaTranscribeWorker", "DiarizeTranscribeWorker", "LiveTranscriber"):
         assert hasattr(w, name), name

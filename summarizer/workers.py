@@ -10,7 +10,7 @@ import logging
 import queue
 from typing import Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 from .transcriber import Transcriber
 from .i18n import t
@@ -171,3 +171,71 @@ class _DeltaTranscribeWorker(QThread):
         except Exception as e:
             _logger.warning("Delta transcription failed: %s", e)
             self.finished.emit("")
+
+
+class LiveTranscriber(QObject):
+    """Drives real-time (untagged) transcription for display during recording.
+
+    Encapsulates the RealtimeTranscribeWorker + a poll timer + committed-sample
+    bookkeeping, so a window can show live text without duplicating the
+    orchestration. Emits text_appended(str) as new chunks arrive.
+    """
+    text_appended = pyqtSignal(str)
+
+    _POLL_MS = 10000
+    _MIN_DELTA_SEC = 3.0
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._recorder = None
+        self._worker = None
+        self._committed_len = 0
+        self._sample_rate = 44100
+        self._timer = QTimer(self)
+        self._timer.setInterval(self._POLL_MS)
+        self._timer.timeout.connect(self._on_tick)
+
+    def start(self, recorder, whisper_model: str):
+        self._recorder = recorder
+        self._committed_len = 0
+        self._sample_rate = getattr(recorder, "sample_rate", 44100)
+        self._worker = RealtimeTranscribeWorker(whisper_model)
+        self._worker.model_ready.connect(self._on_model_ready)
+        self._worker.chunk_ready.connect(self._on_chunk)
+        self._worker.error.connect(lambda e: _logger.warning("LiveTranscriber: %s", e))
+        self._worker.start()
+
+    def _on_model_ready(self):
+        if self._recorder is not None and self._recorder.is_recording():
+            self._timer.start()
+
+    def _on_tick(self):
+        try:
+            if self._recorder is None or self._worker is None:
+                return
+            all_audio = self._recorder.get_all_rt_audio()
+            if all_audio is None or len(all_audio) == 0:
+                return
+            delta = all_audio[self._committed_len:]
+            if len(delta) < self._sample_rate * self._MIN_DELTA_SEC:
+                return
+            self._worker.push_audio(delta, self._sample_rate)
+        except Exception:
+            _logger.exception("LiveTranscriber tick failed (recording continues)")
+
+    def _on_chunk(self, text: str, audio_len: int):
+        self._committed_len += audio_len
+        if text:
+            self.text_appended.emit(text)
+
+    def stop(self):
+        self._timer.stop()
+        if self._worker is not None:
+            try:
+                self._worker.chunk_ready.disconnect(self._on_chunk)
+            except (TypeError, RuntimeError):
+                pass
+            if self._worker.isRunning():
+                self._worker.request_stop()
+        self._worker = None
+        self._recorder = None
