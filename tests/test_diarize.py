@@ -1,4 +1,4 @@
-from summarizer.diarize import Segment, _normalize, _similarity
+from summarizer.diarize import Segment, _normalize, _similarity, merge
 
 
 def test_segment_defaults_speaker_empty():
@@ -40,3 +40,54 @@ def test_similarity_close_transcription_is_high():
 def test_similarity_different_text_is_low():
     score = _similarity("can you send me the report", "the weather is nice today")
     assert score < 0.6
+
+
+def test_merge_system_only_all_remote():
+    sys_segs = [Segment(0.0, 1.0, "hello from remote")]
+    out = merge([], sys_segs)
+    assert [s.speaker for s in out] == ["remote"]
+    assert out[0].text == "hello from remote"
+
+
+def test_merge_mic_segment_with_system_silent_is_me():
+    mic = [Segment(5.0, 6.0, "my local comment")]
+    sys = [Segment(0.0, 1.0, "earlier remote")]  # no time overlap with mic
+    out = merge(mic, sys)
+    me = [s for s in out if s.speaker == "me"]
+    assert len(me) == 1
+    assert me[0].text == "my local comment"
+
+
+def test_merge_echo_is_dropped():
+    # remote voice leaks into mic during the same window with similar text
+    mic = [Segment(0.0, 1.0, "less move the dead line")]
+    sys = [Segment(0.0, 1.0, "let's move the deadline")]
+    out = merge(mic, sys)
+    # only the authoritative remote segment survives; the echo mic seg is dropped
+    assert [s.speaker for s in out] == ["remote"]
+
+
+def test_merge_double_talk_kept_as_me():
+    # both talk in the same window but say different things
+    mic = [Segment(0.0, 1.0, "wait I disagree with that")]
+    sys = [Segment(0.0, 1.0, "the report is due friday")]
+    out = merge(mic, sys)
+    speakers = sorted(s.speaker for s in out)
+    assert speakers == ["me", "remote"]
+
+
+def test_merge_sorted_by_start_time():
+    mic = [Segment(10.0, 11.0, "later local")]
+    sys = [Segment(0.0, 1.0, "early remote")]
+    out = merge(mic, sys)
+    assert out[0].text == "early remote"
+    assert out[1].text == "later local"
+
+
+def test_merge_applies_offset_to_system():
+    # system clock lags mic by 2s; with offset the segments overlap -> echo dropped
+    mic = [Segment(2.0, 3.0, "hello there friend")]
+    sys = [Segment(0.0, 1.0, "hello there friend")]
+    out = merge(mic, sys, offset=2.0)
+    assert [s.speaker for s in out] == ["remote"]
+    assert out[0].start == 2.0  # remote seg shifted onto mic timeline
