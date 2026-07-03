@@ -131,6 +131,34 @@ class Transcriber:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
+    def transcribe_segments(self, audio_path: str, language=None):
+        """Transcribe returning per-segment timestamps for speaker separation."""
+        from .diarize import Segment
+
+        if not Path(audio_path).exists() or Path(audio_path).stat().st_size < 1000:
+            return []
+
+        self._load_model()
+        converted = self._convert_audio(audio_path)
+        cleanup = converted != audio_path
+        try:
+            try:
+                segments, _ = self._model.transcribe(
+                    converted, language=language, beam_size=5,
+                    word_timestamps=False, vad_filter=True,
+                )
+            except Exception:
+                segments, _ = self._model.transcribe(
+                    converted, language=language, beam_size=5, word_timestamps=False,
+                )
+            return [
+                Segment(start=float(s.start), end=float(s.end), text=s.text.strip())
+                for s in segments
+            ]
+        finally:
+            if cleanup:
+                Path(converted).unlink(missing_ok=True)
+
     def transcribe(self, audio_path: str, language: Optional[str] = None) -> str:
         if not Path(audio_path).exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
