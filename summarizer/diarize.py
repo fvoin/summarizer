@@ -112,7 +112,7 @@ def _offset_from_envelopes(env_mic, env_sys, hz: float, max_offset_sec: float = 
     if not np.any(a) or not np.any(b):
         return 0.0
     corr = np.correlate(a, b, mode="full")
-    lag = (len(b) - 1) - int(np.argmax(corr))  # samples to shift sys forward
+    lag = int(np.argmax(corr)) - (len(b) - 1)  # samples to shift sys onto mic timeline
     offset = lag / hz
     return max(-max_offset_sec, min(max_offset_sec, offset))
 
