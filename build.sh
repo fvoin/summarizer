@@ -2,6 +2,21 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+EDITION="${1:-full}"
+if [ "$EDITION" = "lite" ]; then
+  APP_NAME="Summarizer Transcriber"
+  ENTRY="run_lite.py"
+  BUNDLE_ID="com.summarizer.transcriber"
+  DMG_BASE="Summarizer-Transcriber"
+  EXTRA_IMPORTS="--hidden-import summarizer.app_lite --hidden-import summarizer.workers --hidden-import summarizer.widgets --hidden-import summarizer.diarize"
+else
+  APP_NAME="Summarizer"
+  ENTRY="run.py"
+  BUNDLE_ID="com.fvoin.summarizer"
+  DMG_BASE="Summarizer"
+  EXTRA_IMPORTS=""
+fi
+
 # IMPORTANT: bump APP_VERSION in summarizer/config.py before each release.
 # The GitHub release tag (e.g. v1.6) must match APP_VERSION.
 echo "=== Summarizer build ==="
@@ -87,14 +102,15 @@ if command -v sips &>/dev/null && command -v iconutil &>/dev/null; then
 fi
 
 # 7. Build with PyInstaller
-echo "Building Summarizer.app with PyInstaller…"
+echo "Building $APP_NAME.app with PyInstaller…"
 pyinstaller \
     --windowed \
-    --name "Summarizer" \
-    --osx-bundle-identifier "com.fvoin.summarizer" \
+    --name "$APP_NAME" \
+    --osx-bundle-identifier "$BUNDLE_ID" \
     --noconfirm \
     --clean \
     $ICON_ARG \
+    $EXTRA_IMPORTS \
     --add-data "$FFMPEG_DIR/ffmpeg:ffmpeg" \
     --add-data "$WHISPER_CACHE:whisper_model" \
     --add-data "$ICON_PNG:summarizer/icon.png" \
@@ -121,11 +137,11 @@ pyinstaller \
     --exclude-module "matplotlib" \
     --exclude-module "PIL" \
     --exclude-module "pygments" \
-    run.py
+    "$ENTRY"
 
 # 8. Inject microphone permission into Info.plist
 echo "Patching Info.plist for microphone access…"
-PLIST="dist/Summarizer.app/Contents/Info.plist"
+PLIST="dist/$APP_NAME.app/Contents/Info.plist"
 if [ -f "$PLIST" ]; then
     /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Summarizer needs microphone access to record audio for transcription.'" "$PLIST" 2>/dev/null || \
     /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription 'Summarizer needs microphone access to record audio for transcription.'" "$PLIST"
@@ -141,7 +157,7 @@ fi
 
 # 9. Deep codesign: sign every binary inside-out so macOS PAC checks pass
 echo "Code-signing all binaries inside the bundle…"
-APP="dist/Summarizer.app"
+APP="dist/$APP_NAME.app"
 ENT="entitlements.plist"
 
 # Sign all .so, .dylib files first (leaves)
@@ -155,7 +171,7 @@ find "$APP" -name "*.framework" -type d | while read -r f; do
 done
 
 # Sign the main executable
-codesign --force --sign - --options runtime --entitlements "$ENT" "$APP/Contents/MacOS/Summarizer" 2>/dev/null || true
+codesign --force --sign - --options runtime --entitlements "$ENT" "$APP/Contents/MacOS/$APP_NAME" 2>/dev/null || true
 
 # Sign the top-level app bundle
 codesign --force --sign - --options runtime --entitlements "$ENT" "$APP"
@@ -169,9 +185,9 @@ echo "Creating DMG installer…"
 if [ -z "${DMG_NAME:-}" ]; then
     ARCH=$(uname -m)
     if [ "$ARCH" = "arm64" ]; then
-        DMG_NAME="Summarizer-AppleSilicon.dmg"
+        DMG_NAME="$DMG_BASE-AppleSilicon.dmg"
     else
-        DMG_NAME="Summarizer-Intel.dmg"
+        DMG_NAME="$DMG_BASE-Intel.dmg"
     fi
 fi
 DMG_FINAL="dist/$DMG_NAME"
@@ -184,7 +200,7 @@ mkdir -p "$DMG_STAGING"
 cp -R "$APP" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-hdiutil create -volname "Summarizer" -srcfolder "$DMG_STAGING" \
+hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" \
     -ov -format UDZO "$DMG_FINAL" -quiet
 
 rm -rf "$DMG_STAGING"
