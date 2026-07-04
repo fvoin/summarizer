@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 import time
 
-from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtCore import QTimer, QThread, pyqtSignal
+from PyQt6.QtGui import QGuiApplication, QColor
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal, QSize
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QPlainTextEdit, QLabel, QDialog, QLineEdit, QProgressBar, QStackedWidget, QFormLayout,
@@ -60,6 +60,7 @@ class LiteWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(t("lite_title"))
+        self.setStyleSheet(theme.window_style())
         self._recorder = None
         self._diar_recorder = None
         self._start_ts = None
@@ -79,16 +80,22 @@ class LiteWindow(QMainWindow):
 
         row = QHBoxLayout()
         self.record_btn = QPushButton(t("start_recording"))
+        self.record_btn.setStyleSheet(theme.btn_primary())
         self.record_btn.clicked.connect(self._toggle)
         row.addWidget(self.record_btn)
         self.copy_btn = QPushButton(t("lite_copy"))
+        self.copy_btn.setStyleSheet(theme.btn_secondary())
         self.copy_btn.clicked.connect(self._copy)
         self.copy_btn.setEnabled(False)
         row.addWidget(self.copy_btn)
         self.settings_btn = QPushButton(t("tray_settings"))
+        self.settings_btn.setStyleSheet(theme.btn_secondary())
+        self.settings_btn.setIcon(theme.gear_icon(22, QColor(theme.C["text_secondary"])))
+        self.settings_btn.setIconSize(QSize(18, 18))
         self.settings_btn.clicked.connect(self._open_settings)
         row.addWidget(self.settings_btn)
         self.update_btn = QPushButton(t("lite_update_btn"))
+        self.update_btn.setStyleSheet(theme.btn_secondary())
         self.update_btn.setVisible(False)
         self.update_btn.clicked.connect(self._download_update)
         row.addWidget(self.update_btn)
@@ -432,6 +439,7 @@ def main():
 
     logging.basicConfig(level=logging.INFO)
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     theme.apply_palette(app)
     if should_run_setup():
         wiz = LiteSetupWizard()

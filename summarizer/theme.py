@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict
 
 from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtGui import QColor, QPainter, QPalette, QPen
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QStyle, QStyleOptionViewItem,
     QStyledItemDelegate,
@@ -622,3 +622,40 @@ class FlatComboBox(QComboBox):
                 border-radius: 6px;
             """)
             popup.show()
+
+
+def gear_icon(size: int = 32, color: QColor = None) -> QIcon:
+    """Draw a gear/cog icon (shared by the full app and Summarizer Lite)."""
+    import math
+    if color is None:
+        color = QColor(C["text_secondary"])
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+
+    cx, cy = size / 2, size / 2
+    outer_r = size * 0.42
+    inner_r = size * 0.28
+    teeth = 8
+    path = QPainterPath()
+    for i in range(teeth * 2):
+        angle = math.pi * 2 * i / (teeth * 2) - math.pi / 2
+        r = outer_r if i % 2 == 0 else inner_r
+        x = cx + r * math.cos(angle)
+        y = cy + r * math.sin(angle)
+        if i == 0:
+            path.moveTo(x, y)
+        else:
+            path.lineTo(x, y)
+    path.closeSubpath()
+
+    hole = QPainterPath()
+    hole.addEllipse(cx - size * 0.12, cy - size * 0.12, size * 0.24, size * 0.24)
+    path = path.subtracted(hole)
+
+    p.drawPath(path)
+    p.end()
+    return QIcon(pm)

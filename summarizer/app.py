@@ -189,41 +189,6 @@ def _make_stop_icon(size: int = 64, color: QColor = QColor("#ffffff")) -> QIcon:
     return QIcon(pm)
 
 
-def _make_gear_icon(size: int = 32, color: QColor = QColor("#7B68EE")) -> QIcon:
-    """Draw a gear/cog icon."""
-    pm = QPixmap(size, size)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(color)
-
-    cx, cy = size / 2, size / 2
-    import math
-    outer_r = size * 0.42
-    inner_r = size * 0.28
-    teeth = 8
-    path = QPainterPath()
-    for i in range(teeth * 2):
-        angle = math.pi * 2 * i / (teeth * 2) - math.pi / 2
-        r = outer_r if i % 2 == 0 else inner_r
-        x = cx + r * math.cos(angle)
-        y = cy + r * math.sin(angle)
-        if i == 0:
-            path.moveTo(x, y)
-        else:
-            path.lineTo(x, y)
-    path.closeSubpath()
-
-    hole = QPainterPath()
-    hole.addEllipse(cx - size * 0.12, cy - size * 0.12, size * 0.24, size * 0.24)
-    path = path.subtracted(hole)
-
-    p.drawPath(path)
-    p.end()
-    return QIcon(pm)
-
-
 def _make_copy_icon(size: int = 32, color: QColor = QColor("#4A90D9")) -> QIcon:
     """Draw a clipboard/copy icon."""
     pm = QPixmap(size, size)
@@ -2312,7 +2277,8 @@ class SettingsDialog(QDialog):
         self.context_limit_spin.setSingleStep(500)
         self.context_limit_spin.setValue(int(self.cfg.get("context_limit", 5000)))
         self.context_limit_spin.setSuffix(" chars")
-        adv_form.addRow(t("context_limit_label"), self.context_limit_spin)
+        if not self.lite:  # summarization-only setting
+            adv_form.addRow(t("context_limit_label"), self.context_limit_spin)
 
         self.silence_spin = QSpinBox()
         self.silence_spin.setRange(5, 300)
@@ -2345,7 +2311,8 @@ class SettingsDialog(QDialog):
 
         self.transcribe_only_check = QCheckBox(t("transcribe_only_check"))
         self.transcribe_only_check.setChecked(bool(self.cfg.get("transcribe_only", False)))
-        adv_form.addRow(t("mode_label"), self.transcribe_only_check)
+        if not self.lite:  # Lite is always transcribe-only
+            adv_form.addRow(t("mode_label"), self.transcribe_only_check)
 
         self.recordings_edit = QLineEdit(self.cfg.get("recordings_dir", ""))
         self.recordings_edit.setPlaceholderText(t("recordings_dir_placeholder"))
@@ -2883,7 +2850,7 @@ class MainWindow(QMainWindow):
         history_btn.clicked.connect(self._open_history)
         top.addWidget(history_btn)
         settings_btn = QPushButton()
-        settings_btn.setIcon(_make_gear_icon(32, QColor(C["text_secondary"])))
+        settings_btn.setIcon(theme.gear_icon(32, QColor(C["text_secondary"])))
         settings_btn.setIconSize(QSize(22, 22))
         settings_btn.setFixedSize(36, 36)
         settings_btn.setToolTip(t("settings_tooltip"))
