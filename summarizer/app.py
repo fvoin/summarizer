@@ -2360,9 +2360,10 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(adv_tab, t("tab_advanced"))
         if self.lite:
-            # Keep the widgets alive (built for _save) but hide LLM tabs.
-            tabs.setTabVisible(0, False)  # General (cloud/local LLM)
-            tabs.setTabVisible(2, False)  # Instructions (summarization prompts)
+            # Only Instructions (summarization prompts) is irrelevant to Lite.
+            # General (theme, menu bar, sound, check-for-updates) stays; the LLM
+            # controls live in the Models tab's llm_group, hidden separately.
+            tabs.setTabVisible(2, False)
 
         # ── Save / Cancel row ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
