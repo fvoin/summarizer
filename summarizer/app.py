@@ -38,6 +38,12 @@ from . import theme
 from .theme import C
 from .tray import TrayIcon
 from .agent import AgentPoller, PostCompleteWorker
+from .workers import (
+    TranscribeWorker,
+    RealtimeTranscribeWorker,
+    _DeltaTranscribeWorker,
+    DiarizeTranscribeWorker,
+)
 
 _logger = logging.getLogger("app")
 
@@ -286,29 +292,6 @@ def _make_app_icon(size: int = 512) -> QPixmap:
 
 # ── Worker threads ───────────────────────────────────────────────────────
 
-class TranscribeWorker(QThread):
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str)
-    status = pyqtSignal(str)
-
-    def __init__(self, audio_path: str, whisper_model: str):
-        super().__init__()
-        self.audio_path = audio_path
-        self.whisper_model = whisper_model
-
-    def run(self):
-        try:
-            self.status.emit(t("status_transcribing"))
-            _logger.info("TranscribeWorker: model=%s, audio=%s", self.whisper_model, self.audio_path)
-            tr = Transcriber(self.whisper_model)
-            text = tr.transcribe(self.audio_path)
-            _logger.info("TranscribeWorker: done, %d chars", len(text))
-            self.finished.emit(text)
-        except Exception as e:
-            _logger.exception("TranscribeWorker failed")
-            self.error.emit(str(e))
-
-
 class _ModelPreloadWorker(QThread):
     """Loads the configured Whisper model into the module-level cache at app start."""
     def __init__(self, model_name: str):
@@ -322,107 +305,6 @@ class _ModelPreloadWorker(QThread):
             _logger.info("Whisper model '%s' preloaded and cached", self._model_name)
         except Exception as e:
             _logger.warning("Model preload failed: %s", e)
-
-
-class RealtimeTranscribeWorker(QThread):
-    """Transcribes growing audio in real-time, always re-processing the full recording."""
-    chunk_ready = pyqtSignal(str, int)  # (text, audio_len) — audio_len = samples that produced this text
-    model_ready = pyqtSignal()
-    done = pyqtSignal()
-    error = pyqtSignal(str)
-
-    def __init__(self, whisper_model: str):
-        super().__init__()
-        self._model_name = whisper_model
-        self._queue: queue.Queue = queue.Queue()
-        self._transcriber: Optional[Transcriber] = None
-
-    def push_audio(self, audio_data, sample_rate: int):
-        """Push the full accumulated audio for transcription."""
-        self._queue.put((audio_data, sample_rate))
-
-    def request_final(self, audio_data, sample_rate: int):
-        """Push final audio and signal the worker to stop after processing it."""
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
-        self._queue.put((audio_data, sample_rate))
-        self._queue.put(None)  # sentinel
-
-    def request_stop(self):
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
-        self._queue.put(None)
-
-    def run(self):
-        try:
-            self._transcriber = Transcriber(self._model_name)
-            self._transcriber._load_model()
-            _logger.info("RealtimeTranscribeWorker: model ready (%s)", self._model_name)
-            self.model_ready.emit()
-        except Exception as e:
-            _logger.exception("RealtimeTranscribeWorker: failed to load model")
-            self.error.emit(str(e))
-            self.done.emit()
-            return
-
-        while True:
-            try:
-                item = self._queue.get(timeout=1.0)
-            except queue.Empty:
-                continue
-            if item is None:
-                break
-
-            # Drain queue: skip stale items, keep only the latest
-            latest = item
-            is_final = False
-            while True:
-                try:
-                    newer = self._queue.get_nowait()
-                    if newer is None:
-                        is_final = True
-                        break
-                    latest = newer
-                except queue.Empty:
-                    break
-
-            audio_data, sample_rate = latest
-            try:
-                text = self._transcriber.transcribe_array(audio_data, sample_rate)
-                self.chunk_ready.emit(text or "", len(audio_data))
-            except Exception as e:
-                _logger.warning("RealtimeTranscribeWorker: chunk failed: %s", e)
-
-            if is_final:
-                break
-
-        self.done.emit()
-
-
-class _DeltaTranscribeWorker(QThread):
-    """Transcribes a small audio delta (numpy array) and emits the text."""
-    finished = pyqtSignal(str)
-
-    def __init__(self, audio_data, sample_rate: int, model_name: str):
-        super().__init__()
-        self._audio = audio_data
-        self._sr = sample_rate
-        self._model_name = model_name
-
-    def run(self):
-        try:
-            t = Transcriber(self._model_name)
-            text = t.transcribe_array(self._audio, self._sr)
-            self.finished.emit(text or "")
-        except Exception as e:
-            _logger.warning("Delta transcription failed: %s", e)
-            self.finished.emit("")
 
 
 class SummarizeWorker(QThread):
@@ -3613,10 +3495,15 @@ class MainWindow(QMainWindow):
         self._cleanup_rt()
 
         audio_file = self._recorder.stop()
+        sources = self._recorder.get_source_files()
+        self._diar_recorder = self._recorder  # kept only to cleanup_sources() later
         self._recorder = None
         self._reset_record_btn()
 
         if not audio_file:
+            if self._diar_recorder:
+                self._diar_recorder.cleanup_sources()
+                self._diar_recorder = None
             _logger.warning("Recording stopped but no audio captured")
             self._set_status(t("status_recording_failed"), "error")
             return
@@ -3633,6 +3520,28 @@ class MainWindow(QMainWindow):
                 shutil.copy2(audio_file, dest)
             except Exception:
                 pass
+
+        # Speaker separation: when both mic and system streams were captured,
+        # re-transcribe them separately and tag Me/Remote (post-recording).
+        mic_srcs = sources.get("mic") or []
+        sys_src = sources.get("system")
+        if mic_srcs and sys_src:
+            self._pending_audio_path = audio_file
+            self._pending_duration = duration
+            self._set_status(f"{status_prefix}{t('status_processing')}", "busy")
+            self.progress.setVisible(True)
+            self.record_btn.setEnabled(False)
+            worker = DiarizeTranscribeWorker(whisper_model, mic_srcs[0], sys_src)
+            worker.finished.connect(self._on_diarized)
+            worker.error.connect(self._on_diarize_failed)
+            self._track_worker(worker)
+            worker.start()
+            return
+
+        # Single stream: the retained source files won't be used for diarization — free them now.
+        if self._diar_recorder:
+            self._diar_recorder.cleanup_sources()
+            self._diar_recorder = None
 
         self._pending_audio_path = audio_file
         self._pending_duration = duration
@@ -3725,6 +3634,30 @@ class MainWindow(QMainWindow):
             self._set_busy(True)
             self.result_text.clear()
             self._run_summarize(transcript, duration_seconds=duration)
+
+    def _on_diarized(self, transcript: str):
+        """Speaker-tagged transcript ready — route through the normal sink."""
+        rec = getattr(self, "_diar_recorder", None)
+        if rec:
+            rec.cleanup_sources()
+            self._diar_recorder = None
+        self._use_rt_transcript(transcript)
+
+    def _on_diarize_failed(self, _err: str):
+        """Diarization produced nothing usable — fall back to plain transcription."""
+        rec = getattr(self, "_diar_recorder", None)
+        if rec:
+            rec.cleanup_sources()
+            self._diar_recorder = None
+        audio = getattr(self, "_pending_audio_path", None)
+        duration = getattr(self, "_pending_duration", None)
+        self._pending_audio_path = None
+        self._pending_duration = None
+        if audio:
+            self._process_audio(audio, duration_seconds=duration)
+        else:
+            self._set_busy(False)
+            self._on_error(t("error_no_speech"))
 
     def _stop_recording(self):
         if not self._recorder:

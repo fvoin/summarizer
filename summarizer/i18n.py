@@ -112,6 +112,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "context_limit_label":      {"en": "Context Limit:",                      "ru": "Лимит контекста:"},
     "silence_timeout_label":    {"en": "Silence Timeout:",                    "ru": "Таймаут тишины:"},
     "input_device_label":       {"en": "Input Device:",                       "ru": "Устройство ввода:"},
+    "input_device_default":     {"en": "System default",                      "ru": "Системный по умолчанию"},
     "device_default":           {"en": "Default",                             "ru": "По умолчанию"},
     "save_audio_label":         {"en": "Save Audio:",                         "ru": "Сохранять аудио:"},
     "save_audio_check":         {"en": "Save recorded audio files to recordings dir",
@@ -371,6 +372,35 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "agent_notify_uploaded":    {"en": "Uploaded: {title}",                   "ru": "Загружено: {title}"},
     "agent_notify_noshow":      {"en": "No voice detected, skipped: {title}", "ru": "Голос не обнаружен, пропущено: {title}"},
     "agent_notify_error":       {"en": "Agent error: {error}",               "ru": "Ошибка агента: {error}"},
+
+    # ── Lite window ──────────────────────────────────────────────────────
+    "lite_title": {"en": "Summarizer Lite", "ru": "Summarizer Lite"},
+    "lite_ready": {"en": "Ready", "ru": "Готово"},
+    "lite_placeholder": {"en": "Transcript will appear here.",
+                          "ru": "Транскрипт появится здесь."},
+    "lite_copy": {"en": "Copy transcript", "ru": "Копировать транскрипт"},
+    "lite_copied": {"en": "Copied to clipboard", "ru": "Скопировано в буфер обмена"},
+    "lite_done": {"en": "Transcript ready", "ru": "Транскрипт готов"},
+    "lite_error": {"en": "Transcription failed: {err}", "ru": "Ошибка транскрипции: {err}"},
+    "lite_update_btn": {"en": "Update", "ru": "Обновить"},
+    "lite_update_avail": {"en": "Update available: {ver}", "ru": "Доступно обновление: {ver}"},
+    "lite_updating": {"en": "Downloading update…", "ru": "Загрузка обновления…"},
+    "lite_update_done": {"en": "Opening installer…", "ru": "Открываю установщик…"},
+    "lite_agent_waiting": {"en": "Waiting for scheduled meetings…",
+                            "ru": "Ожидание запланированных встреч…"},
+    "lite_agent_recording": {"en": "Auto-recording: {title}",
+                              "ru": "Автозапись: {title}"},
+    "lite_uploaded": {"en": "Transcript uploaded", "ru": "Транскрипт загружен"},
+    "lite_upload_failed": {"en": "Upload failed: {err}", "ru": "Ошибка загрузки: {err}"},
+
+    # ── Lite setup wizard ────────────────────────────────────────────────
+    "lite_setup_title": {"en": "Set up Transcriber", "ru": "Настройка Транскрибатора"},
+    "lite_setup_mic": {"en": "Choose your microphone. Grant mic access if prompted.",
+                        "ru": "Выберите микрофон. Разрешите доступ к микрофону при запросе."},
+    "lite_setup_url": {"en": "Backend URL", "ru": "URL бэкенда"},
+    "lite_setup_token": {"en": "Access token", "ru": "Токен доступа"},
+    "lite_setup_download": {"en": "Downloading the transcription model…",
+                             "ru": "Загрузка модели транскрипции…"},
 }
 
 
