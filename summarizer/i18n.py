@@ -388,6 +388,8 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "lite_update_done": {"en": "Opening installer…", "ru": "Открываю установщик…"},
     "lite_agent_waiting": {"en": "Waiting for scheduled meetings…",
                             "ru": "Ожидание запланированных встреч…"},
+    "lite_agent_countdown": {"en": "Auto-record «{title}» in {mins} min",
+                              "ru": "Автозапись «{title}» через {mins} мин"},
     "lite_agent_recording": {"en": "Auto-recording: {title}",
                               "ru": "Автозапись: {title}"},
     "lite_uploaded": {"en": "Transcript uploaded", "ru": "Транскрипт загружен"},

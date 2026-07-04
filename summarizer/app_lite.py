@@ -111,14 +111,16 @@ class LiteWindow(QMainWindow):
 
         self._agent_meeting = None
         self._poller = None
+        self._next_meeting = None  # {title, start_ts} of the soonest upcoming meeting
         cfg = config.load()
         if cfg.get("agent_enabled") and cfg.get("agent_url") and cfg.get("agent_token"):
-            from .agent import AgentPoller
-            self._poller = AgentPoller(self)
-            self._poller.meeting_armed.connect(self._on_meeting_armed)
-            self._poller.error.connect(lambda e: _logger.warning("agent: %s", e))
-            self._poller.start()
-            self.status.setText(t("lite_agent_waiting"))
+            self._start_poller()
+
+        # Countdown to the next auto-recording, refreshed in the status line.
+        self._countdown = QTimer(self)
+        self._countdown.setInterval(20000)
+        self._countdown.timeout.connect(self._update_countdown)
+        self._countdown.start()
 
         # Check for a newer release (downloads the lite DMG when the user opts in).
         self._update_url = None
@@ -170,21 +172,44 @@ class LiteWindow(QMainWindow):
         SettingsDialog(self, lite=True).exec()
         self._refresh_agent()
 
+    def _start_poller(self):
+        from .agent import AgentPoller
+        self._poller = AgentPoller(self)
+        self._poller.meeting_armed.connect(self._on_meeting_armed)
+        self._poller.next_meeting.connect(self._on_next_meeting)
+        self._poller.error.connect(lambda e: _logger.warning("agent: %s", e))
+        self._poller.start()
+        self.status.setText(t("lite_agent_waiting"))
+
     def _refresh_agent(self):
         """Start/stop the agent poller to match the (possibly changed) config."""
         cfg = config.load()
         want = bool(cfg.get("agent_enabled") and cfg.get("agent_url") and cfg.get("agent_token"))
         if want and self._poller is None:
-            from .agent import AgentPoller
-            self._poller = AgentPoller(self)
-            self._poller.meeting_armed.connect(self._on_meeting_armed)
-            self._poller.error.connect(lambda e: _logger.warning("agent: %s", e))
-            self._poller.start()
-            self.status.setText(t("lite_agent_waiting"))
+            self._start_poller()
         elif not want and self._poller is not None:
             self._poller.stop()
             self._poller.wait(2000)
             self._poller = None
+            self._next_meeting = None
+
+    def _on_next_meeting(self, info: dict):
+        self._next_meeting = info or None
+        self._update_countdown()
+
+    def _update_countdown(self):
+        """Show 'auto-record in N min' in the status line while idle."""
+        if self._rt_diar is not None or self._poller is None:
+            return  # recording/transcribing, or agent off — leave status as is
+        info = self._next_meeting
+        if info and info.get("start_ts"):
+            secs = info["start_ts"] - time.time()
+            if secs >= 30:
+                self.status.setText(t("lite_agent_countdown",
+                                      title=info.get("title", ""),
+                                      mins=int(secs // 60)))
+                return
+        self.status.setText(t("lite_agent_waiting"))
 
     # ── recording ────────────────────────────────────────────────
     def _toggle(self):
@@ -261,10 +286,12 @@ class LiteWindow(QMainWindow):
             self.status.setText(t("status_recording_failed"))
 
     def _on_plain_fallback(self, err):
+        self._rt_diar = None
         self._tray.set_idle()
         self.status.setText(t("lite_error", err=err))
 
     def _on_transcript(self, text: str):
+        self._rt_diar = None
         self._tray.set_idle()
         self.transcript.setPlainText(text)
         self.copy_btn.setEnabled(bool(text.strip()))

@@ -38,6 +38,7 @@ class AgentPoller(QThread):
     """
 
     meeting_armed = pyqtSignal(dict)
+    next_meeting = pyqtSignal(dict)  # soonest upcoming meeting {title, start_ts}; {} = none
     error = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -103,6 +104,7 @@ class AgentPoller(QThread):
         now = datetime.now(timezone.utc)
         _logger.info("Poll returned %d meeting(s), now=%s", len(data), now.isoformat())
         min_seconds = float("inf")
+        next_info: dict = {}
         for meeting in data:
             mid = meeting.get("id") or meeting.get("calendarEventId") or meeting.get("title", "")
             _logger.info("  Meeting '%s' (id=%s) start=%s", meeting.get("title", "?"), mid, meeting.get("start", "?"))
@@ -119,8 +121,9 @@ class AgentPoller(QThread):
                 _logger.warning("  Cannot parse start time: %s", start_str)
                 continue
             seconds_until = (start - now).total_seconds()
-            if seconds_until > 0:
-                min_seconds = min(min_seconds, seconds_until)
+            if 0 < seconds_until < min_seconds:
+                min_seconds = seconds_until
+                next_info = {"title": meeting.get("title", ""), "start_ts": start.timestamp()}
             # Arm if meeting is about to start or already started (within last 10 min)
             if seconds_until <= ARM_LEAD_TIME and seconds_until > -600:
                 self._armed_ids.add(mid)
@@ -128,6 +131,8 @@ class AgentPoller(QThread):
                 self.meeting_armed.emit(meeting)
             else:
                 _logger.info("  -> Not arming, seconds_until=%.0f", seconds_until)
+
+        self.next_meeting.emit(next_info)
 
         # Poll faster when a meeting is within 10 minutes
         if min_seconds < 600:
