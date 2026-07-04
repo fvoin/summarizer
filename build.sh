@@ -4,10 +4,10 @@ cd "$(dirname "$0")"
 
 EDITION="${1:-full}"
 if [ "$EDITION" = "lite" ]; then
-  APP_NAME="Summarizer Transcriber"
+  APP_NAME="Transcriber"
   ENTRY="run_lite.py"
-  BUNDLE_ID="com.summarizer.transcriber"
-  DMG_BASE="Summarizer-Transcriber"
+  BUNDLE_ID="com.summarizer.transcriber"  # unchanged: keeps update continuity
+  DMG_BASE="Transcriber"
   EXTRA_IMPORTS="--hidden-import summarizer.app_lite --hidden-import summarizer.workers --hidden-import summarizer.widgets --hidden-import summarizer.diarize"
 else
   APP_NAME="Summarizer"

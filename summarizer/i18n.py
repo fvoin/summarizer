@@ -374,7 +374,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "agent_notify_error":       {"en": "Agent error: {error}",               "ru": "Ошибка агента: {error}"},
 
     # ── Lite window ──────────────────────────────────────────────────────
-    "lite_title": {"en": "Summarizer Lite", "ru": "Summarizer Lite"},
+    "lite_title": {"en": "Transcriber", "ru": "Transcriber"},
     "lite_ready": {"en": "Ready", "ru": "Готово"},
     "lite_placeholder": {"en": "Transcript will appear here.",
                           "ru": "Транскрипт появится здесь."},
@@ -394,7 +394,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "lite_upload_failed": {"en": "Upload failed: {err}", "ru": "Ошибка загрузки: {err}"},
 
     # ── Lite setup wizard ────────────────────────────────────────────────
-    "lite_setup_title": {"en": "Set up Transcriber", "ru": "Настройка Транскрибатора"},
+    "lite_setup_title": {"en": "Set up Transcriber", "ru": "Настройка Transcriber"},
     "lite_setup_mic": {"en": "Choose your microphone. Grant mic access if prompted.",
                         "ru": "Выберите микрофон. Разрешите доступ к микрофону при запросе."},
     "lite_setup_url": {"en": "Backend URL", "ru": "URL бэкенда"},

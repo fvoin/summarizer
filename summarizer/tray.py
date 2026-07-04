@@ -27,15 +27,16 @@ def _dot_icon(color: str, size: int = 22) -> QIcon:
 class TrayIcon(QSystemTrayIcon):
     """System tray icon with recording controls."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, app_name: str = "Summarizer"):
         super().__init__(parent)
+        self._app_name = app_name
 
         self._icon_idle = _dot_icon("#888888")
         self._icon_recording = _dot_icon("#D94A4A")
         self._icon_processing = _dot_icon("#4A90D9")
 
         self.setIcon(self._icon_idle)
-        self.setToolTip("Summarizer")
+        self.setToolTip(self._app_name)
 
         self._menu = QMenu()
 
@@ -81,7 +82,7 @@ class TrayIcon(QSystemTrayIcon):
         else:
             self.setIcon(self._icon_idle)
             self._rec_action.setText(t("tray_start_rec"))
-            self.setToolTip("Summarizer")
+            self.setToolTip(self._app_name)
 
     def set_processing(self):
         self.setIcon(self._icon_processing)
@@ -90,4 +91,4 @@ class TrayIcon(QSystemTrayIcon):
     def set_idle(self):
         if not self._recording:
             self.setIcon(self._icon_idle)
-            self.setToolTip("Summarizer")
+            self.setToolTip(self._app_name)

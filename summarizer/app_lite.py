@@ -132,7 +132,7 @@ class LiteWindow(QMainWindow):
 
     # ── tray (menu-bar) ───────────────────────────────────────────
     def _setup_tray(self):
-        self._tray = TrayIcon(self)
+        self._tray = TrayIcon(self, app_name=t("lite_title"))
         self._tray.show_action.triggered.connect(self._tray_show)
         self._tray.rec_action.triggered.connect(self._toggle)
         self._tray.settings_action.triggered.connect(self._open_settings)
