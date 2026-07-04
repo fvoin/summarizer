@@ -2027,8 +2027,13 @@ class _LocalLLMRow(QWidget):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None, bg_whisper: dict = None, bg_llm: dict = None):
+    def __init__(self, parent=None, bg_whisper: dict = None, bg_llm: dict = None, lite: bool = False):
         super().__init__(parent)
+        # lite: reused by Summarizer Lite — hides the LLM/cloud/instruction tabs,
+        # keeping only Whisper model + Advanced (mic, backend, menu bar). The LLM
+        # widgets are still built (so _save keeps their values untouched) but not
+        # shown as tabs.
+        self.lite = lite
         self.setWindowTitle(t("settings_title"))
         self.setMinimumWidth(580)
         self.setMinimumHeight(820)
@@ -2290,9 +2295,11 @@ class SettingsDialog(QDialog):
         update_row.addWidget(version_label)
         general_form.addRow("", update_row)
 
-        tabs.addTab(general_tab, t("tab_general"))
+        if not self.lite:
+            tabs.addTab(general_tab, t("tab_general"))
         tabs.addTab(models_scroll, t("tab_models"))
-        tabs.addTab(instr_tab, t("tab_instructions"))
+        if not self.lite:
+            tabs.addTab(instr_tab, t("tab_instructions"))
 
         # ── TAB: Advanced ─────────────────────────────────────────────────
         adv_tab = QWidget()

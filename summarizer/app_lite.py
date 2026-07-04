@@ -22,6 +22,7 @@ from .workers import LiveTranscriber, DiarizeTranscribeWorker, TranscribeWorker
 from .transcriber import download_model
 from .widgets import MicPicker
 from .updater import check_for_update, download_and_open
+from .tray import TrayIcon
 
 _logger = logging.getLogger("app_lite")
 
@@ -84,6 +85,9 @@ class LiteWindow(QMainWindow):
         self.copy_btn.clicked.connect(self._copy)
         self.copy_btn.setEnabled(False)
         row.addWidget(self.copy_btn)
+        self.settings_btn = QPushButton(t("tray_settings"))
+        self.settings_btn.clicked.connect(self._open_settings)
+        row.addWidget(self.settings_btn)
         self.update_btn = QPushButton(t("lite_update_btn"))
         self.update_btn.setVisible(False)
         self.update_btn.clicked.connect(self._download_update)
@@ -117,6 +121,66 @@ class LiteWindow(QMainWindow):
         self._upd_check.found.connect(self._on_update_found)
         self._upd_check.start()
 
+        self._setup_tray()
+
+    # ── tray (menu-bar) ───────────────────────────────────────────
+    def _setup_tray(self):
+        self._tray = TrayIcon(self)
+        self._tray.show_action.triggered.connect(self._tray_show)
+        self._tray.rec_action.triggered.connect(self._toggle)
+        self._tray.settings_action.triggered.connect(self._open_settings)
+        self._tray.quit_action.triggered.connect(self._tray_quit)
+        self._tray.show()  # Lite lives in the menu bar
+
+    @staticmethod
+    def _set_dock_visible(visible: bool):
+        try:
+            import AppKit
+            policy = (AppKit.NSApplicationActivationPolicyRegular if visible
+                      else AppKit.NSApplicationActivationPolicyAccessory)
+            AppKit.NSApp.setActivationPolicy_(policy)
+            if visible:
+                AppKit.NSApp.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass
+
+    def _tray_show(self):
+        self._set_dock_visible(True)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_quit(self):
+        if self._poller:
+            self._poller.stop()
+            self._poller.wait(2000)
+        self._tray.hide()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
+
+    def _open_settings(self):
+        # Reuse the full app's SettingsDialog in lite mode (hides LLM tabs).
+        # Lazily imported so lite startup stays free of the LLM modules.
+        from .app import SettingsDialog
+        SettingsDialog(self, lite=True).exec()
+        self._refresh_agent()
+
+    def _refresh_agent(self):
+        """Start/stop the agent poller to match the (possibly changed) config."""
+        cfg = config.load()
+        want = bool(cfg.get("agent_enabled") and cfg.get("agent_url") and cfg.get("agent_token"))
+        if want and self._poller is None:
+            from .agent import AgentPoller
+            self._poller = AgentPoller(self)
+            self._poller.meeting_armed.connect(self._on_meeting_armed)
+            self._poller.error.connect(lambda e: _logger.warning("agent: %s", e))
+            self._poller.start()
+            self.status.setText(t("lite_agent_waiting"))
+        elif not want and self._poller is not None:
+            self._poller.stop()
+            self._poller.wait(2000)
+            self._poller = None
+
     # ── recording ────────────────────────────────────────────────
     def _toggle(self):
         if self._recorder and self._recorder.is_recording():
@@ -140,6 +204,7 @@ class LiteWindow(QMainWindow):
         self._timer.start()
         wm = cfg.get("whisper_model", "base")
         self._live.start(self._recorder, wm)
+        self._tray.set_recording(True)
 
     def _on_meeting_armed(self, meeting: dict):
         if self._recorder and self._recorder.is_recording():
@@ -174,14 +239,17 @@ class LiteWindow(QMainWindow):
         self._diar_recorder = self._recorder
         self._recorder = None
         self._last_duration = duration
+        self._tray.set_recording(False)
 
         if not mixed:
             self._cleanup_sources()
             self._agent_meeting = None
+            self._tray.set_idle()
             self.status.setText(t("status_recording_failed"))
             return
 
         self.status.setText(t("status_transcribing"))
+        self._tray.set_processing()
         cfg = config.load()
         wm = cfg.get("whisper_model", "base")
         mic = sources.get("mic") or []
@@ -204,10 +272,12 @@ class LiteWindow(QMainWindow):
 
     def _on_plain_fallback(self, err):
         self._cleanup_sources()
+        self._tray.set_idle()
         self.status.setText(t("lite_error", err=err))
 
     def _on_transcript(self, text: str):
         self._cleanup_sources()
+        self._tray.set_idle()
         self.transcript.setPlainText(text)
         self.copy_btn.setEnabled(bool(text.strip()))
         self.status.setText(t("lite_done"))
@@ -264,10 +334,11 @@ class LiteWindow(QMainWindow):
             self._workers.remove(worker)
 
     def closeEvent(self, event):
-        if self._poller:
-            self._poller.stop()
-            self._poller.wait(2000)
-        super().closeEvent(event)
+        # Stay in the menu bar: hide the window instead of quitting so the
+        # agent poller keeps auto-recording. Real quit is via the tray menu.
+        self.hide()
+        self._set_dock_visible(False)
+        event.ignore()
 
 
 class LiteSetupWizard(QDialog):
