@@ -131,7 +131,7 @@ class Transcriber:
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 
-    def transcribe_segments(self, audio_path: str, language=None):
+    def transcribe_segments(self, audio_path: str, language=None, beam_size: int = 5):
         """Transcribe returning per-segment timestamps for speaker separation."""
         from .diarize import Segment
 
@@ -144,12 +144,12 @@ class Transcriber:
         try:
             try:
                 segments, _ = self._model.transcribe(
-                    converted, language=language, beam_size=5,
+                    converted, language=language, beam_size=beam_size,
                     word_timestamps=False, vad_filter=True,
                 )
             except Exception:
                 segments, _ = self._model.transcribe(
-                    converted, language=language, beam_size=5, word_timestamps=False,
+                    converted, language=language, beam_size=beam_size, word_timestamps=False,
                 )
             return [
                 Segment(start=float(s.start), end=float(s.end), text=s.text.strip())
@@ -158,6 +158,49 @@ class Transcriber:
         finally:
             if cleanup:
                 Path(converted).unlink(missing_ok=True)
+
+    def transcribe_array_segments(self, audio_data, sample_rate: int,
+                                  time_offset: float = 0.0, beam_size: int = 1,
+                                  language=None):
+        """Transcribe a numpy audio chunk into timestamped Segments.
+
+        Fast path for real-time speaker separation: uses beam_size=1 by default
+        and shifts every segment's start/end by ``time_offset`` seconds so the
+        chunk's local timeline maps onto the whole-recording timeline.
+        """
+        import tempfile
+        import soundfile as sf_mod
+        from .diarize import Segment
+
+        self._load_model()
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        try:
+            sf_mod.write(tmp_path, audio_data, sample_rate)
+            converted = self._convert_audio(tmp_path)
+            cleanup_conv = converted != tmp_path
+            try:
+                try:
+                    segments, _ = self._model.transcribe(
+                        converted, language=language, beam_size=beam_size,
+                        word_timestamps=False, vad_filter=True,
+                    )
+                except Exception:
+                    segments, _ = self._model.transcribe(
+                        converted, language=language, beam_size=beam_size, word_timestamps=False,
+                    )
+                return [
+                    Segment(start=float(s.start) + time_offset,
+                            end=float(s.end) + time_offset,
+                            text=s.text.strip())
+                    for s in segments
+                ]
+            finally:
+                if cleanup_conv:
+                    Path(converted).unlink(missing_ok=True)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
     def transcribe(self, audio_path: str, language: Optional[str] = None) -> str:
         if not Path(audio_path).exists():

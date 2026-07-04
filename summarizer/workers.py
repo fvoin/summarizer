@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 from typing import Optional
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
@@ -252,3 +253,110 @@ class LiveTranscriber(QObject):
     def _drop_retired(self, worker):
         if worker in self._retired:
             self._retired.remove(worker)
+
+
+class RealtimeDiarizer(QThread):
+    """Real-time speaker separation.
+
+    Transcribes the mic and system streams SEPARATELY and incrementally while
+    recording (reading the recorder's per-stream RT buffers), so at Stop only a
+    quick final delta + merge remain — instead of re-transcribing both full
+    streams after the meeting. Uses beam_size=1 and a single worker (one model,
+    streams processed one after another) to keep CPU load real-time-capable.
+    """
+    partial = pyqtSignal(str)     # live tagged transcript during recording
+    finished = pyqtSignal(str)    # final tagged transcript
+    error = pyqtSignal(str)
+
+    _INTERVAL = 20.0     # seconds between incremental passes
+    _MIN_DELTA = 8.0     # min new audio (s) worth transcribing mid-recording
+
+    def __init__(self, whisper_model: str, recorder, locale: str = "en", parent=None):
+        super().__init__(parent)
+        self._model_name = whisper_model
+        self._recorder = recorder
+        self._locale = locale
+        self._sr = int(getattr(recorder, "sample_rate", 44100))
+        self._stop = threading.Event()
+        self._mic_segs = []
+        self._sys_segs = []
+        self._mic_done = 0   # samples of mic already transcribed
+        self._sys_done = 0   # samples of system already transcribed
+
+    def request_finalize(self):
+        """Ask the diarizer to transcribe the tail and emit the final transcript."""
+        self._stop.set()
+
+    def run(self):
+        from . import diarize
+        try:
+            tr = Transcriber(self._model_name)
+            tr._load_model()
+        except Exception as e:
+            _logger.exception("RealtimeDiarizer: model load failed")
+            self.error.emit(str(e))
+            return
+
+        # Incremental passes while recording.
+        while not self._stop.is_set():
+            self._stop.wait(self._INTERVAL)
+            if self._stop.is_set():
+                break
+            try:
+                self._pass(tr, final=False)
+                self.partial.emit(self._merge_text(diarize, offset=0.0))
+            except Exception:
+                _logger.exception("RealtimeDiarizer: pass failed (continuing)")
+
+        # Final pass + merge with full energy/offset gating.
+        try:
+            self._pass(tr, final=True)
+            streams = self._recorder.get_stream_rt_audio()
+            mic_full = streams.get("mic")
+            sys_full = streams.get("system")
+
+            # Degenerate cases: only one stream -> plain, untagged transcript.
+            if not self._sys_segs:
+                self.finished.emit(" ".join(s.text for s in self._mic_segs).strip())
+                return
+            if not self._mic_segs:
+                self.finished.emit(" ".join(s.text for s in self._sys_segs).strip())
+                return
+
+            offset = 0.0
+            if mic_full is not None and sys_full is not None:
+                env_m = diarize._envelope(mic_full, self._sr, 100.0)
+                env_s = diarize._envelope(sys_full, self._sr, 100.0)
+                offset = diarize._offset_from_envelopes(env_m, env_s, 100.0)
+            if mic_full is not None:
+                for s in self._mic_segs:
+                    s.energy = diarize.rms_window(mic_full, self._sr, s.start, s.end)
+
+            merged = diarize.merge(self._mic_segs, self._sys_segs, offset=offset)
+            self.finished.emit(diarize.format_transcript(merged, locale=self._locale))
+        except Exception as e:
+            _logger.exception("RealtimeDiarizer: finalize failed")
+            self.error.emit(str(e))
+
+    def _pass(self, tr, final: bool):
+        """Transcribe the new audio of each stream since the last pass."""
+        streams = self._recorder.get_stream_rt_audio()
+        min_new = int(self._sr * (0.5 if final else self._MIN_DELTA))
+
+        sys_a = streams.get("system")
+        if sys_a is not None and (len(sys_a) - self._sys_done) >= min_new:
+            delta = sys_a[self._sys_done:]
+            self._sys_segs.extend(tr.transcribe_array_segments(
+                delta, self._sr, time_offset=self._sys_done / self._sr, beam_size=1))
+            self._sys_done = len(sys_a)
+
+        mic_a = streams.get("mic")
+        if mic_a is not None and (len(mic_a) - self._mic_done) >= min_new:
+            delta = mic_a[self._mic_done:]
+            self._mic_segs.extend(tr.transcribe_array_segments(
+                delta, self._sr, time_offset=self._mic_done / self._sr, beam_size=1))
+            self._mic_done = len(mic_a)
+
+    def _merge_text(self, diarize, offset: float) -> str:
+        merged = diarize.merge(self._mic_segs, self._sys_segs, offset=offset)
+        return diarize.format_transcript(merged, locale=self._locale)

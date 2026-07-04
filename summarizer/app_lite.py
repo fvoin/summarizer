@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 from . import config, theme
 from .i18n import t
 from .recorder import AudioRecorder
-from .workers import LiveTranscriber, DiarizeTranscribeWorker, TranscribeWorker
+from .workers import RealtimeDiarizer
 from .transcriber import download_model
 from .widgets import MicPicker
 from .updater import check_for_update, download_and_open
@@ -62,7 +62,6 @@ class LiteWindow(QMainWindow):
         self.setWindowTitle(t("lite_title"))
         self.setStyleSheet(theme.window_style())
         self._recorder = None
-        self._diar_recorder = None
         self._start_ts = None
         self._last_duration = 0
         self._workers = []
@@ -108,8 +107,7 @@ class LiteWindow(QMainWindow):
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
 
-        self._live = LiveTranscriber(self)
-        self._live.text_appended.connect(self._append_live)
+        self._rt_diar = None  # RealtimeDiarizer for the active recording
 
         self._agent_meeting = None
         self._poller = None
@@ -210,7 +208,12 @@ class LiteWindow(QMainWindow):
         self.status.setText(t("status_recording"))
         self._timer.start()
         wm = cfg.get("whisper_model", "base")
-        self._live.start(self._recorder, wm)
+        from .i18n import locale
+        self._rt_diar = RealtimeDiarizer(wm, self._recorder, locale=locale(), parent=self)
+        self._rt_diar.partial.connect(self._set_live)
+        self._rt_diar.finished.connect(self._on_transcript)
+        self._rt_diar.error.connect(self._on_plain_fallback)
+        self._rt_diar.start()
         self._tray.set_recording(True)
 
     def _on_meeting_armed(self, meeting: dict):
@@ -220,10 +223,9 @@ class LiteWindow(QMainWindow):
         self._start()
         self.status.setText(t("lite_agent_recording", title=meeting.get("title", "")))
 
-    def _append_live(self, text: str):
-        current = self.transcript.toPlainText()
-        sep = " " if current else ""
-        self.transcript.setPlainText(current + sep + text)
+    def _set_live(self, text: str):
+        """Live (partial) tagged transcript updates during recording."""
+        self.transcript.setPlainText(text)
         sb = self.transcript.verticalScrollBar()
         sb.setValue(sb.maximum())
 
@@ -235,55 +237,33 @@ class LiteWindow(QMainWindow):
 
     def _stop(self):
         self._timer.stop()
-        self._live.stop()
         self.record_btn.setText(t("start_recording"))
         self.record_btn.setStyleSheet(theme.btn_primary())
         duration = int(time.monotonic() - self._start_ts) if self._start_ts else 0
         self._start_ts = None
 
-        mixed = self._recorder.stop()
-        sources = self._recorder.get_source_files()
-        self._diar_recorder = self._recorder
-        self._recorder = None
+        # Stop capture (fills the RT buffers fully); the diarizer reads them.
+        self._recorder.stop()
+        self._recorder.cleanup_sources()  # RT diarizer uses in-memory buffers
+        self._recorder = None  # the RealtimeDiarizer holds its own reference
         self._last_duration = duration
         self._tray.set_recording(False)
+        self._tray.set_processing()
+        self.status.setText(t("status_transcribing"))
 
-        if not mixed:
-            self._cleanup_sources()
-            self._agent_meeting = None
+        if self._rt_diar is not None:
+            # Transcription happened live during the meeting — just finalize
+            # (transcribe the tail + merge). finished -> _on_transcript.
+            self._rt_diar.request_finalize()
+        else:
             self._tray.set_idle()
             self.status.setText(t("status_recording_failed"))
-            return
-
-        self.status.setText(t("status_transcribing"))
-        self._tray.set_processing()
-        cfg = config.load()
-        wm = cfg.get("whisper_model", "base")
-        mic = sources.get("mic") or []
-        sysf = sources.get("system")
-        if mic and sysf:
-            worker = DiarizeTranscribeWorker(wm, mic[0], sysf)
-            worker.finished.connect(self._on_transcript)
-            worker.error.connect(self._on_plain_fallback)
-            self._track(worker)
-            worker.start()
-        else:
-            self._plain_transcribe(mixed, wm)
-
-    def _plain_transcribe(self, mixed, wm):
-        worker = TranscribeWorker(mixed, wm)
-        worker.finished.connect(self._on_transcript)
-        worker.error.connect(lambda e: (self._cleanup_sources(), self.status.setText(t("lite_error", err=e))))
-        self._track(worker)
-        worker.start()
 
     def _on_plain_fallback(self, err):
-        self._cleanup_sources()
         self._tray.set_idle()
         self.status.setText(t("lite_error", err=err))
 
     def _on_transcript(self, text: str):
-        self._cleanup_sources()
         self._tray.set_idle()
         self.transcript.setPlainText(text)
         self.copy_btn.setEnabled(bool(text.strip()))
@@ -302,11 +282,6 @@ class LiteWindow(QMainWindow):
         worker.error.connect(lambda e: self.status.setText(t("lite_upload_failed", err=e)))
         self._track(worker)
         worker.start()
-
-    def _cleanup_sources(self):
-        if self._diar_recorder:
-            self._diar_recorder.cleanup_sources()
-            self._diar_recorder = None
 
     def _copy(self):
         QGuiApplication.clipboard().setText(self.transcript.toPlainText())

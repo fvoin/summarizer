@@ -280,6 +280,38 @@ class AudioRecorder:
         mixed = np.mean([a[:min_len].astype(np.float64) for a in device_arrays], axis=0)
         return mixed.astype(np.float32)
 
+    def get_stream_rt_audio(self) -> dict:
+        """Return accumulated RT audio for the mic and system streams SEPARATELY.
+
+        {"mic": np.ndarray | None, "system": np.ndarray | None} — mono float32,
+        full recording so far (buffer not cleared). Used for real-time speaker
+        separation so the two streams can be transcribed independently while
+        recording. Mic = every input device except the system-audio tap
+        (mixed if several); system = the Core Audio / ScreenCaptureKit tap.
+        """
+        with self._rt_lock:
+            snapshot = {k: list(v) for k, v in self._rt_frames_per_device.items()}
+
+        def _concat(keys) -> Optional[np.ndarray]:
+            arrays = []
+            for k in keys:
+                frames = snapshot.get(k)
+                if not frames:
+                    continue
+                arr = np.concatenate(frames, axis=0)
+                if arr.ndim > 1:
+                    arr = arr.mean(axis=1)
+                arrays.append(arr.astype(np.float32))
+            if not arrays:
+                return None
+            if len(arrays) == 1:
+                return arrays[0]
+            n = min(len(a) for a in arrays)
+            return np.mean([a[:n].astype(np.float64) for a in arrays], axis=0).astype(np.float32)
+
+        mic_keys = [k for k in snapshot if k != self._SYS_AUDIO_DEV]
+        return {"mic": _concat(mic_keys), "system": _concat([self._SYS_AUDIO_DEV])}
+
     _SYS_AUDIO_DEV = -1
 
     def _on_system_audio_chunk(self, audio: np.ndarray):
