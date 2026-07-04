@@ -11,6 +11,8 @@ import queue
 import threading
 from typing import Optional
 
+import numpy as np
+
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 from .transcriber import Transcriber
@@ -270,6 +272,9 @@ class RealtimeDiarizer(QThread):
 
     _INTERVAL = 20.0     # seconds between incremental passes
     _MIN_DELTA = 8.0     # min new audio (s) worth transcribing mid-recording
+    _MIN_GAP = 0.5       # min system-silent gap (s) to treat as a local turn
+    _MIC_RMS = 0.004     # min mic energy in a silent gap to be real speech
+    _SYS_PAD = 0.3       # pad system-active regions (s) to avoid edge echo
 
     def __init__(self, whisper_model: str, recorder, locale: str = "en", parent=None):
         super().__init__(parent)
@@ -304,59 +309,82 @@ class RealtimeDiarizer(QThread):
                 break
             try:
                 self._pass(tr, final=False)
-                self.partial.emit(self._merge_text(diarize, offset=0.0))
+                self.partial.emit(self._merge_text(diarize))
             except Exception:
                 _logger.exception("RealtimeDiarizer: pass failed (continuing)")
 
-        # Final pass + merge with full energy/offset gating.
+        # Final pass, then just combine (attribution already decided by which
+        # stream each segment came from — no echo guessing needed).
         try:
             self._pass(tr, final=True)
-            streams = self._recorder.get_stream_rt_audio()
-            mic_full = streams.get("mic")
-            sys_full = streams.get("system")
-
-            # Degenerate cases: only one stream -> plain, untagged transcript.
+            # Single-speaker recordings -> plain, untagged transcript.
             if not self._sys_segs:
                 self.finished.emit(" ".join(s.text for s in self._mic_segs).strip())
                 return
             if not self._mic_segs:
                 self.finished.emit(" ".join(s.text for s in self._sys_segs).strip())
                 return
-
-            offset = 0.0
-            if mic_full is not None and sys_full is not None:
-                env_m = diarize._envelope(mic_full, self._sr, 100.0)
-                env_s = diarize._envelope(sys_full, self._sr, 100.0)
-                offset = diarize._offset_from_envelopes(env_m, env_s, 100.0)
-            if mic_full is not None:
-                for s in self._mic_segs:
-                    s.energy = diarize.rms_window(mic_full, self._sr, s.start, s.end)
-
-            merged = diarize.merge(self._mic_segs, self._sys_segs, offset=offset)
-            self.finished.emit(diarize.format_transcript(merged, locale=self._locale))
+            self.finished.emit(diarize.format_transcript(self._combined(), locale=self._locale))
         except Exception as e:
             _logger.exception("RealtimeDiarizer: finalize failed")
             self.error.emit(str(e))
 
     def _pass(self, tr, final: bool):
-        """Transcribe the new audio of each stream since the last pass."""
+        """Transcribe new system audio (Remote), and the mic ONLY where the
+        remote is silent (your turns). Echo during remote speech is never
+        transcribed — the system stream already covers it."""
         streams = self._recorder.get_stream_rt_audio()
         min_new = int(self._sr * (0.5 if final else self._MIN_DELTA))
 
+        # 1. System stream -> Remote (also defines when the remote is talking).
         sys_a = streams.get("system")
         if sys_a is not None and (len(sys_a) - self._sys_done) >= min_new:
             delta = sys_a[self._sys_done:]
-            self._sys_segs.extend(tr.transcribe_array_segments(
-                delta, self._sr, time_offset=self._sys_done / self._sr, beam_size=1))
+            for s in tr.transcribe_array_segments(
+                    delta, self._sr, time_offset=self._sys_done / self._sr, beam_size=1):
+                s.speaker = "remote"
+                self._sys_segs.append(s)
             self._sys_done = len(sys_a)
 
+        # 2. Mic -> Me, only within system-silent gaps that contain real speech.
         mic_a = streams.get("mic")
         if mic_a is not None and (len(mic_a) - self._mic_done) >= min_new:
-            delta = mic_a[self._mic_done:]
-            self._mic_segs.extend(tr.transcribe_array_segments(
-                delta, self._sr, time_offset=self._mic_done / self._sr, beam_size=1))
+            t0 = self._mic_done / self._sr
+            t1 = len(mic_a) / self._sr
+            for g0, g1 in self._silent_gaps(t0, t1):
+                if (g1 - g0) < self._MIN_GAP:
+                    continue
+                chunk = mic_a[int(g0 * self._sr):int(g1 * self._sr)]
+                if len(chunk) == 0:
+                    continue
+                rms = float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
+                if rms < self._MIC_RMS:
+                    continue  # silence / no real local speech in this gap
+                for s in tr.transcribe_array_segments(chunk, self._sr, time_offset=g0, beam_size=1):
+                    s.speaker = "me"
+                    self._mic_segs.append(s)
             self._mic_done = len(mic_a)
 
-    def _merge_text(self, diarize, offset: float) -> str:
-        merged = diarize.merge(self._mic_segs, self._sys_segs, offset=offset)
-        return diarize.format_transcript(merged, locale=self._locale)
+    def _silent_gaps(self, t0: float, t1: float):
+        """Sub-intervals of [t0, t1] where the remote (system) is silent."""
+        active = sorted((s.start - self._SYS_PAD, s.end + self._SYS_PAD)
+                        for s in self._sys_segs if s.end > t0 and s.start < t1)
+        gaps = []
+        cur = t0
+        for a0, a1 in active:
+            if a0 > cur:
+                gaps.append((cur, min(a0, t1)))
+            cur = max(cur, a1)
+            if cur >= t1:
+                break
+        if cur < t1:
+            gaps.append((cur, t1))
+        return gaps
+
+    def _combined(self):
+        segs = list(self._sys_segs) + list(self._mic_segs)
+        segs.sort(key=lambda s: s.start)
+        return segs
+
+    def _merge_text(self, diarize) -> str:
+        return diarize.format_transcript(self._combined(), locale=self._locale)

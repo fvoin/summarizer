@@ -60,3 +60,14 @@ def test_realtime_diarizer_single_stream_is_plain(monkeypatch):
     _run(diar)
     assert "Remote:" not in out["text"] and "Me:" not in out["text"]
     assert "remote speaker words" in out["text"]
+
+
+def test_silent_gaps_are_the_windows_between_remote_speech():
+    from summarizer.workers import RealtimeDiarizer
+    from summarizer.diarize import Segment
+    diar = RealtimeDiarizer.__new__(RealtimeDiarizer)  # no QThread init needed
+    diar._sys_segs = [Segment(2.0, 4.0, "remote talks", speaker="remote")]
+    # remote active window padded by _SYS_PAD (0.3) -> [1.7, 4.3];
+    # silent gaps in [0, 6] are before and after.
+    gaps = diar._silent_gaps(0.0, 6.0)
+    assert gaps == [(0.0, 1.7), (4.3, 6.0)]
