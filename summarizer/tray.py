@@ -40,7 +40,7 @@ class TrayIcon(QSystemTrayIcon):
 
         self._menu = QMenu()
 
-        self._show_action = self._menu.addAction(t("tray_show"))
+        self._show_action = self._menu.addAction(t("tray_show", name=app_name))
         self._menu.addSeparator()
 
         self._rec_action = self._menu.addAction(t("tray_start_rec"))

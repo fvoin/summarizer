@@ -345,7 +345,7 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "ctx_editor_no_meetings":   {"en": "No meetings for this context yet.",  "ru": "Пока нет встреч для этого контекста."},
 
     # ── Menu bar / Tray ─────────────────────────────────────────────────
-    "tray_show":                {"en": "Show Summarizer",                     "ru": "Показать Summarizer"},
+    "tray_show":                {"en": "Show {name}",                         "ru": "Показать {name}"},
     "tray_start_rec":           {"en": "Start Recording",                     "ru": "Начать запись"},
     "tray_stop_rec":            {"en": "Stop Recording",                      "ru": "Остановить запись"},
     "tray_settings":            {"en": "Settings…",                           "ru": "Настройки…"},
