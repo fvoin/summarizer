@@ -54,6 +54,20 @@ def _overlapping_sys_text(
     return " ".join(parts)
 
 
+def _overlap_and_max_sim(mic_seg, sys_segments: list, offset: float):
+    """(does the mic segment overlap any active system segment, best per-segment
+    text similarity to those overlapping segments). Comparing against each system
+    segment individually — rather than their concatenation — avoids diluting an
+    echo that matches one system utterance when several overlap the window."""
+    overlaps = False
+    best = 0.0
+    for s in sys_segments:
+        if _overlaps(mic_seg.start, mic_seg.end, s.start + offset, s.end + offset):
+            overlaps = True
+            best = max(best, _similarity(mic_seg.text, s.text))
+    return overlaps, best
+
+
 def merge(
     mic_segments: list,
     sys_segments: list,
@@ -84,13 +98,13 @@ def merge(
 
     # Classify each mic segment.
     for m in mic_segments:
-        sys_text = _overlapping_sys_text(m.start, m.end, sys_segments, offset)
-        if not sys_text:
+        overlaps, max_sim = _overlap_and_max_sim(m, sys_segments, offset)
+        if not overlaps:
             # Remote silent in this window -> definitely local.
             result.append(Segment(m.start, m.end, m.text, speaker="me", energy=m.energy))
             continue
-        if _similarity(m.text, sys_text) >= similarity_threshold:
-            # Echo of the remote voice -> already covered by the Remote track.
+        if max_sim >= similarity_threshold:
+            # Echo of a remote utterance -> already covered by the Remote track.
             continue
         # System active but text differs. If this mic segment is much quieter
         # than local speech, it's remote echo that transcribed differently -> drop.
@@ -122,7 +136,7 @@ def format_transcript(segments: list, locale: str = "en") -> str:
     return "\n".join(lines)
 
 
-def _offset_from_envelopes(env_mic, env_sys, hz: float, max_offset_sec: float = 5.0) -> float:
+def _offset_from_envelopes(env_mic, env_sys, hz: float, max_offset_sec: float = 1.5) -> float:
     a = np.asarray(env_mic, dtype=float)
     b = np.asarray(env_sys, dtype=float)
     if a.size == 0 or b.size == 0:
@@ -132,9 +146,16 @@ def _offset_from_envelopes(env_mic, env_sys, hz: float, max_offset_sec: float = 
     if not np.any(a) or not np.any(b):
         return 0.0
     corr = np.correlate(a, b, mode="full")
-    lag = int(np.argmax(corr)) - (len(b) - 1)  # samples to shift sys onto mic timeline
-    offset = lag / hz
-    return max(-max_offset_sec, min(max_offset_sec, offset))
+    # The two streams start near-simultaneously, so the true offset is small.
+    # Search only within ±max_offset_sec for the peak; taking the GLOBAL argmax
+    # lets a spurious far peak win on repetitive speech and pin the result to
+    # the clamp boundary (observed: garbage 5.0 s that wrecks alignment).
+    center = len(b) - 1  # index of lag 0
+    max_shift = max(1, int(max_offset_sec * hz))
+    lo = max(0, center - max_shift)
+    hi = min(len(corr), center + max_shift + 1)
+    lag = (lo + int(np.argmax(corr[lo:hi]))) - center  # samples to shift sys onto mic
+    return lag / hz
 
 
 def _envelope(samples, sr: int, target_hz: float = 100.0):
@@ -179,7 +200,7 @@ def annotate_energies(mic_path: str, segments: list) -> list:
     return segments
 
 
-def estimate_offset(mic_path: str, sys_path: str, max_offset_sec: float = 5.0) -> float:
+def estimate_offset(mic_path: str, sys_path: str, max_offset_sec: float = 1.5) -> float:
     try:
         import soundfile as sf
 

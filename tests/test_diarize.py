@@ -199,3 +199,34 @@ def test_merge_energy_gating_disabled_without_baseline():
     out = merge(mic, sys, energy_ratio=0.4)
     texts = [s.text for s in out]
     assert "quiet overlapping" in texts                  # kept (no baseline to gate against)
+
+
+# ── regression: offset search window + per-segment similarity ─────────────
+
+def test_offset_prefers_near_peak_over_far_spurious():
+    """The bulk offset search must stay within its window and not be dragged to
+    a strong spurious peak far outside it (regression for the garbage 5.0s that
+    wrecked alignment on repetitive speech)."""
+    import numpy as np
+    from summarizer.diarize import _offset_from_envelopes
+    n = 600
+    patt = np.hanning(20)
+    mic = np.zeros(n); mic[50:70] = patt
+    sys = np.zeros(n)
+    sys[50:70] = 0.5 * patt     # weak, aligned (lag ~0, inside window)
+    sys[450:470] = 3.0 * patt   # strong, far (lag ~4s, outside ±1s window)
+    off = _offset_from_envelopes(mic, sys, hz=100.0, max_offset_sec=1.0)
+    assert abs(off) < 0.1       # near peak chosen, far strong peak ignored
+
+
+def test_merge_echo_matches_best_single_segment_not_concatenation():
+    """An echo matching ONE remote utterance must be detected even when another
+    unrelated remote utterance also overlaps the window (comparing per-segment,
+    not against the concatenation which would dilute the match)."""
+    mic = [Segment(0.0, 3.0, "move the deadline please")]
+    sys = [
+        Segment(0.0, 1.5, "move the deadline please"),           # strong match
+        Segment(1.5, 3.0, "and also the budget report numbers"),  # unrelated overlap
+    ]
+    out = merge(mic, sys)
+    assert all(s.speaker == "remote" for s in out)               # echo dropped, no "me"
