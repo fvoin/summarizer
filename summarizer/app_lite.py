@@ -244,7 +244,6 @@ class LiteWindow(QMainWindow):
 
         # Stop capture (fills the RT buffers fully); the diarizer reads them.
         self._recorder.stop()
-        self._save_streams(self._recorder.get_source_files())
         self._recorder.cleanup_sources()  # RT diarizer uses in-memory buffers
         self._recorder = None  # the RealtimeDiarizer holds its own reference
         self._last_duration = duration
@@ -283,26 +282,6 @@ class LiteWindow(QMainWindow):
         worker.error.connect(lambda e: self.status.setText(t("lite_upload_failed", err=e)))
         self._track(worker)
         worker.start()
-
-    def _save_streams(self, sources):
-        """When 'Save audio' is enabled, keep the separate mic + system WAVs in
-        the recordings folder so the two streams can be inspected."""
-        try:
-            if not config.load().get("save_audio", False):
-                return
-            import os
-            import shutil
-            from datetime import datetime
-            rdir = str(config.get_recordings_dir())
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            for i, p in enumerate(sources.get("mic") or []):
-                suffix = "" if i == 0 else str(i)
-                shutil.copy2(p, os.path.join(rdir, f"recording_{ts}_mic{suffix}.wav"))
-            if sources.get("system"):
-                shutil.copy2(sources["system"], os.path.join(rdir, f"recording_{ts}_system.wav"))
-            _logger.info("Saved mic/system streams to %s", rdir)
-        except Exception:
-            _logger.exception("Failed to save streams")
 
     def _copy(self):
         QGuiApplication.clipboard().setText(self.transcript.toPlainText())
