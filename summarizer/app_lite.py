@@ -212,7 +212,7 @@ class LiteWindow(QMainWindow):
         info = self._next_meeting
         if info and info.get("start_ts"):
             secs = info["start_ts"] - time.time()
-            if secs >= 30:
+            if 30 <= secs <= 90 * 60:  # only count down when the meeting is soon
                 self.status.setText(t("lite_agent_countdown",
                                       title=info.get("title", ""),
                                       mins=int(secs // 60)))
