@@ -21,8 +21,38 @@ from .recorder import AudioRecorder
 from .workers import LiveTranscriber, DiarizeTranscribeWorker, TranscribeWorker
 from .transcriber import download_model
 from .widgets import MicPicker
+from .updater import check_for_update, download_and_open
 
 _logger = logging.getLogger("app_lite")
+
+
+class _LiteUpdateCheckWorker(QThread):
+    """Check GitHub for a newer release (edition-aware via config.EDITION)."""
+    found = pyqtSignal(dict)
+
+    def run(self):
+        try:
+            info = check_for_update()
+            if info:
+                self.found.emit(info)
+        except Exception as e:
+            _logger.warning("update check failed: %s", e)
+
+
+class _LiteUpdateDownloadWorker(QThread):
+    done = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, url, parent=None):
+        super().__init__(parent)
+        self._url = url
+
+    def run(self):
+        try:
+            download_and_open(self._url)
+            self.done.emit()
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class LiteWindow(QMainWindow):
@@ -54,6 +84,10 @@ class LiteWindow(QMainWindow):
         self.copy_btn.clicked.connect(self._copy)
         self.copy_btn.setEnabled(False)
         row.addWidget(self.copy_btn)
+        self.update_btn = QPushButton(t("lite_update_btn"))
+        self.update_btn.setVisible(False)
+        self.update_btn.clicked.connect(self._download_update)
+        row.addWidget(self.update_btn)
         lay.addLayout(row)
 
         self.setCentralWidget(central)
@@ -76,6 +110,12 @@ class LiteWindow(QMainWindow):
             self._poller.error.connect(lambda e: _logger.warning("agent: %s", e))
             self._poller.start()
             self.status.setText(t("lite_agent_waiting"))
+
+        # Check for a newer release (downloads the lite DMG when the user opts in).
+        self._update_url = None
+        self._upd_check = _LiteUpdateCheckWorker(self)
+        self._upd_check.found.connect(self._on_update_found)
+        self._upd_check.start()
 
     # ── recording ────────────────────────────────────────────────
     def _toggle(self):
@@ -194,6 +234,24 @@ class LiteWindow(QMainWindow):
     def _copy(self):
         QGuiApplication.clipboard().setText(self.transcript.toPlainText())
         self.status.setText(t("lite_copied"))
+
+    def _on_update_found(self, info: dict):
+        self._update_url = info.get("dmg_url")
+        if not self._update_url:
+            return
+        self.status.setText(t("lite_update_avail", ver=info.get("tag", "")))
+        self.update_btn.setVisible(True)
+
+    def _download_update(self):
+        if not self._update_url:
+            return
+        self.status.setText(t("lite_updating"))
+        self.update_btn.setEnabled(False)
+        worker = _LiteUpdateDownloadWorker(self._update_url, self)
+        worker.done.connect(lambda: self.status.setText(t("lite_update_done")))
+        worker.error.connect(lambda e: self.status.setText(t("lite_error", err=e)))
+        self._track(worker)
+        worker.start()
 
     def _track(self, worker):
         self._workers.append(worker)

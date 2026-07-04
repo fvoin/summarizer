@@ -2,6 +2,7 @@
 
 import json
 import logging
+import platform
 import ssl
 import subprocess
 import urllib.request
@@ -22,6 +23,29 @@ RELEASES_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 def _parse_version(tag: str) -> tuple:
     return tuple(int(x) for x in tag.lstrip("v").split("."))
+
+
+def _arch_tag() -> str:
+    """DMG arch suffix for the running process."""
+    return "AppleSilicon" if platform.machine() == "arm64" else "Intel"
+
+
+def _select_dmg(assets: list, edition: str, arch: str) -> Optional[str]:
+    """Pick the DMG download URL matching this edition and CPU architecture.
+
+    Lite DMGs contain "Transcriber" in the name; full ones do not. Within the
+    matching edition, prefer the asset whose name contains this arch tag.
+    """
+    dmgs = [a for a in assets if a.get("name", "").lower().endswith(".dmg")]
+    if not dmgs:
+        return None
+    want_lite = edition == "lite"
+    same_edition = [a for a in dmgs if ("transcriber" in a["name"].lower()) == want_lite]
+    pool = same_edition or dmgs  # fall back to any DMG if naming is unexpected
+    for a in pool:
+        if arch.lower() in a["name"].lower():
+            return a["browser_download_url"]
+    return pool[0]["browser_download_url"]
 
 
 def check_for_update() -> Optional[Dict]:
@@ -56,15 +80,11 @@ def check_for_update() -> Optional[Dict]:
         _logger.info("Already up to date")
         return None
 
-    dmg_url = None
-    for asset in data.get("assets", []):
-        if asset.get("name", "").lower().endswith(".dmg"):
-            dmg_url = asset["browser_download_url"]
-            break
-
+    dmg_url = _select_dmg(data.get("assets", []), config.EDITION, _arch_tag())
     if not dmg_url:
         _logger.warning("New version %s found but no DMG asset", tag)
         return None
+    _logger.info("Selected DMG for edition=%s arch=%s: %s", config.EDITION, _arch_tag(), dmg_url)
 
     return {
         "tag": tag,

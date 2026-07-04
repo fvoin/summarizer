@@ -6,7 +6,12 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.21.4"
+APP_VERSION = "1.22.0"
+
+# Which build this is: "full" (Summarizer) or "lite" (Summarizer Lite /
+# Transcriber). Set by the lite entry point (run_lite.py) via env var so the
+# updater downloads the matching DMG. Defaults to the full edition.
+EDITION = os.environ.get("SUMMARIZER_EDITION", "full")
 
 _CONFIG_DIR = Path.home() / ".summarizer"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"

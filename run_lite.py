@@ -8,6 +8,10 @@ import sys
 import os
 import multiprocessing
 
+# Mark this process as the lite edition BEFORE any summarizer module is imported,
+# so config.EDITION resolves to "lite" and the updater fetches the lite DMG.
+os.environ.setdefault("SUMMARIZER_EDITION", "lite")
+
 multiprocessing.freeze_support()
 if multiprocessing.current_process().name != "MainProcess":
     sys.exit(0)
