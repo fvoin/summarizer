@@ -243,9 +243,10 @@ class LiteWindow(QMainWindow):
         self._start_ts = None
 
         # Stop capture (fills the RT buffers fully); the diarizer reads them.
-        self._recorder.stop()
+        mixed = self._recorder.stop()
         self._recorder.cleanup_sources()  # RT diarizer uses in-memory buffers
         self._recorder = None  # the RealtimeDiarizer holds its own reference
+        self._save_audio(mixed)  # keeps the combined recording if 'Save audio' is on
         self._last_duration = duration
         self._tray.set_recording(False)
         self._tray.set_processing()
@@ -282,6 +283,22 @@ class LiteWindow(QMainWindow):
         worker.error.connect(lambda e: self.status.setText(t("lite_upload_failed", err=e)))
         self._track(worker)
         worker.start()
+
+    def _save_audio(self, mixed_path):
+        """Keep the combined recording in the recordings folder when 'Save
+        audio' is enabled (the two streams are not saved separately)."""
+        try:
+            if not mixed_path or not config.load().get("save_audio", False):
+                return
+            import os
+            import shutil
+            from datetime import datetime
+            rdir = str(config.get_recordings_dir())
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            shutil.copy2(mixed_path, os.path.join(rdir, f"recording_{ts}.wav"))
+            _logger.info("Saved recording to %s", rdir)
+        except Exception:
+            _logger.exception("Failed to save recording")
 
     def _copy(self):
         QGuiApplication.clipboard().setText(self.transcript.toPlainText())
