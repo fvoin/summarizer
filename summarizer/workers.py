@@ -283,6 +283,7 @@ class RealtimeDiarizer(QThread):
         self._locale = locale
         self._sr = int(getattr(recorder, "sample_rate", 44100))
         self._stop = threading.Event()
+        self._aborted = False
         self._mic_segs = []
         self._sys_segs = []
         self._mic_done = 0   # samples of mic already transcribed
@@ -290,6 +291,11 @@ class RealtimeDiarizer(QThread):
 
     def request_finalize(self):
         """Ask the diarizer to transcribe the tail and emit the final transcript."""
+        self._stop.set()
+
+    def request_abort(self):
+        """Stop ASAP without finalizing (used when the app is quitting)."""
+        self._aborted = True
         self._stop.set()
 
     def run(self):
@@ -312,6 +318,9 @@ class RealtimeDiarizer(QThread):
                 self.partial.emit(self._merge_text(diarize))
             except Exception:
                 _logger.exception("RealtimeDiarizer: pass failed (continuing)")
+
+        if self._aborted:
+            return  # app quitting — skip finalize, exit the thread cleanly
 
         # Final pass, then just combine (attribution already decided by which
         # stream each segment came from — no echo guessing needed).

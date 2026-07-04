@@ -158,9 +158,17 @@ class LiteWindow(QMainWindow):
         self.activateWindow()
 
     def _tray_quit(self):
+        # Stop the diarizer thread before teardown, or Qt aborts ("QThread
+        # destroyed while running").
+        d = self._rt_diar
+        if d is not None and d.isRunning():
+            d.request_abort()
+            d.wait(10000)
         if self._poller:
             self._poller.stop()
             self._poller.wait(2000)
+        if self._upd_check is not None and self._upd_check.isRunning():
+            self._upd_check.wait(3000)
         self._tray.hide()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()
@@ -219,6 +227,18 @@ class LiteWindow(QMainWindow):
             self._start()
 
     def _start(self):
+        # If a previous diarizer is still finishing, detach its signals and
+        # abort it so it doesn't emit into the new recording.
+        old = self._rt_diar
+        if old is not None and old.isRunning():
+            try:
+                old.partial.disconnect(self._set_live)
+                old.finished.disconnect(self._on_transcript)
+                old.error.disconnect(self._on_plain_fallback)
+            except (TypeError, RuntimeError):
+                pass
+            old.request_abort()
+
         cfg = config.load()
         self._recorder = AudioRecorder(
             silence_timeout=cfg.get("silence_timeout", 30),
