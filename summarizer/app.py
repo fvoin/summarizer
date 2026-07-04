@@ -2154,6 +2154,8 @@ class SettingsDialog(QDialog):
             self._local_llm_rows[key] = row
 
         models_vlay.addWidget(llm_group)
+        if self.lite:  # LLM model / API key / Ollama — not used by Lite
+            llm_group.setVisible(False)
 
         # Whisper model group
         whisper_group = QGroupBox(t("whisper_group"))
@@ -2260,11 +2262,9 @@ class SettingsDialog(QDialog):
         update_row.addWidget(version_label)
         general_form.addRow("", update_row)
 
-        if not self.lite:
-            tabs.addTab(general_tab, t("tab_general"))
+        tabs.addTab(general_tab, t("tab_general"))
         tabs.addTab(models_scroll, t("tab_models"))
-        if not self.lite:
-            tabs.addTab(instr_tab, t("tab_instructions"))
+        tabs.addTab(instr_tab, t("tab_instructions"))
 
         # ── TAB: Advanced ─────────────────────────────────────────────────
         adv_tab = QWidget()
@@ -2359,6 +2359,10 @@ class SettingsDialog(QDialog):
         adv_form.addRow(agent_group)
 
         tabs.addTab(adv_tab, t("tab_advanced"))
+        if self.lite:
+            # Keep the widgets alive (built for _save) but hide LLM tabs.
+            tabs.setTabVisible(0, False)  # General (cloud/local LLM)
+            tabs.setTabVisible(2, False)  # Instructions (summarization prompts)
 
         # ── Save / Cancel row ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
