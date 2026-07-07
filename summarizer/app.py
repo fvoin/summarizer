@@ -2220,39 +2220,6 @@ class SettingsDialog(QDialog):
         general_form.setContentsMargins(12, 12, 12, 12)
         general_form.setSpacing(8)
 
-        # Recording backend (auto-record) — key functionality, esp. for Transcriber
-        agent_group = QGroupBox(t("agent_group"))
-        agent_vlay = QVBoxLayout(agent_group)
-        agent_inner = QFormLayout()
-        agent_inner.setSpacing(8)
-
-        self.agent_url_edit = QLineEdit(self.cfg.get("agent_url", ""))
-        self.agent_url_edit.setPlaceholderText(t("agent_url_placeholder"))
-        agent_inner.addRow(t("agent_url_label"), self.agent_url_edit)
-
-        self.agent_token_edit = QLineEdit(self.cfg.get("agent_token", ""))
-        self.agent_token_edit.setPlaceholderText(t("agent_token_placeholder"))
-        self.agent_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        agent_inner.addRow(t("agent_token_label"), self.agent_token_edit)
-
-        self.agent_enabled_check = QCheckBox(t("agent_enabled_check"))
-        self.agent_enabled_check.setChecked(bool(self.cfg.get("agent_enabled", False)))
-        agent_inner.addRow("", self.agent_enabled_check)
-
-        agent_vlay.addLayout(agent_inner)
-
-        test_row = QHBoxLayout()
-        self._agent_test_btn = QPushButton(t("agent_test_btn"))
-        self._agent_test_btn.clicked.connect(self._test_agent_connection)
-        test_row.addWidget(self._agent_test_btn)
-        self._agent_test_status = QLabel("")
-        self._agent_test_status.setWordWrap(True)
-        self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']};")
-        test_row.addWidget(self._agent_test_status, 1)
-        agent_vlay.addLayout(test_row)
-
-        general_form.addRow(agent_group)
-
         # Theme selector
         self.theme_combo = theme.FlatComboBox()
         _theme_keys = theme.THEME_NAMES
@@ -2294,6 +2261,39 @@ class SettingsDialog(QDialog):
         version_label.setStyleSheet(f"color: {C['text_muted']}; font-size: 12px;")
         update_row.addWidget(version_label)
         general_form.addRow("", update_row)
+
+        # Recording backend (auto-record) — key functionality, esp. for Transcriber
+        agent_group = QGroupBox(t("agent_group"))
+        agent_vlay = QVBoxLayout(agent_group)
+        agent_inner = QFormLayout()
+        agent_inner.setSpacing(8)
+
+        self.agent_url_edit = QLineEdit(self.cfg.get("agent_url", ""))
+        self.agent_url_edit.setPlaceholderText(t("agent_url_placeholder"))
+        agent_inner.addRow(t("agent_url_label"), self.agent_url_edit)
+
+        self.agent_token_edit = QLineEdit(self.cfg.get("agent_token", ""))
+        self.agent_token_edit.setPlaceholderText(t("agent_token_placeholder"))
+        self.agent_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        agent_inner.addRow(t("agent_token_label"), self.agent_token_edit)
+
+        self.agent_enabled_check = QCheckBox(t("agent_enabled_check"))
+        self.agent_enabled_check.setChecked(bool(self.cfg.get("agent_enabled", False)))
+        agent_inner.addRow("", self.agent_enabled_check)
+
+        agent_vlay.addLayout(agent_inner)
+
+        test_row = QHBoxLayout()
+        self._agent_test_btn = QPushButton(t("agent_test_btn"))
+        self._agent_test_btn.clicked.connect(self._test_agent_connection)
+        test_row.addWidget(self._agent_test_btn)
+        self._agent_test_status = QLabel("")
+        self._agent_test_status.setWordWrap(True)
+        self._agent_test_status.setStyleSheet(f"font-size: 11px; color: {C['text_secondary']};")
+        test_row.addWidget(self._agent_test_status, 1)
+        agent_vlay.addLayout(test_row)
+
+        general_form.addRow(agent_group)
 
         tabs.addTab(general_tab, t("tab_general"))
         tabs.addTab(models_scroll, t("tab_models"))
