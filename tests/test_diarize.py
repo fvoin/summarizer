@@ -230,3 +230,15 @@ def test_merge_echo_matches_best_single_segment_not_concatenation():
     ]
     out = merge(mic, sys)
     assert all(s.speaker == "remote" for s in out)               # echo dropped, no "me"
+
+
+def test_format_transcript_merges_consecutive_same_speaker():
+    segs = [
+        Segment(0, 1, "hello", speaker="me"),
+        Segment(1, 2, "how are you", speaker="me"),
+        Segment(2, 3, "fine", speaker="remote"),
+        Segment(3, 4, "and you", speaker="remote"),
+        Segment(4, 5, "good", speaker="me"),
+    ]
+    out = format_transcript(segs, locale="en")
+    assert out == "Me: hello how are you\nRemote: fine and you\nMe: good"

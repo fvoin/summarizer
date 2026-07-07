@@ -124,15 +124,22 @@ _LABELS = {
 
 
 def format_transcript(segments: list, locale: str = "en") -> str:
-    lines = []
+    # Group consecutive segments from the same speaker into one block, so a run
+    # of the same speaker is one line, not "Me: … / Me: … / Me: …".
+    blocks: list = []  # [ [speaker, [texts...]], ... ]
     for seg in segments:
         text = seg.text.strip()
         if not text:
             continue
-        label = _LABELS.get(seg.speaker, {}).get(locale)
-        if label is None:
-            label = seg.speaker or "?"
-        lines.append(f"{label}: {text}")
+        if blocks and blocks[-1][0] == seg.speaker:
+            blocks[-1][1].append(text)
+        else:
+            blocks.append([seg.speaker, [text]])
+
+    lines = []
+    for speaker, texts in blocks:
+        label = _LABELS.get(speaker, {}).get(locale) or speaker or "?"
+        lines.append(f"{label}: {' '.join(texts)}")
     return "\n".join(lines)
 
 
