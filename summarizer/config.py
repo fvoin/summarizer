@@ -6,7 +6,7 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.22.3"
+APP_VERSION = "1.22.4"
 
 # Which build this is: "full" (Summarizer) or "lite" (Summarizer Lite /
 # Transcriber). Set by the lite entry point (run_lite.py) via env var so the
