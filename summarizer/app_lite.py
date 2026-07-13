@@ -1,6 +1,8 @@
 """Lite transcript client: record -> live transcript -> Me/Remote tag -> copy/upload.
 
-Never imports summarizer.summarizer or summarizer.db.
+Never imports summarizer.summarizer (the LLM layer) at module load. The light
+summarizer.db is used lazily (transcript history) and app.HistoryDialog /
+SettingsDialog are imported lazily on demand.
 """
 
 from __future__ import annotations
@@ -87,6 +89,13 @@ class LiteWindow(QMainWindow):
         self.copy_btn.clicked.connect(self._copy)
         self.copy_btn.setEnabled(False)
         row.addWidget(self.copy_btn)
+        self.history_btn = QPushButton()
+        self.history_btn.setStyleSheet(theme.btn_secondary())
+        self.history_btn.setIcon(theme.history_icon(22, QColor(theme.C["text_secondary"])))
+        self.history_btn.setIconSize(QSize(18, 18))
+        self.history_btn.setToolTip(t("history_tooltip"))
+        self.history_btn.clicked.connect(self._open_history)
+        row.addWidget(self.history_btn)
         self.settings_btn = QPushButton(t("tray_settings"))
         self.settings_btn.setStyleSheet(theme.btn_secondary())
         self.settings_btn.setIcon(theme.gear_icon(22, QColor(theme.C["text_secondary"])))
@@ -173,6 +182,12 @@ class LiteWindow(QMainWindow):
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()
 
+    def _open_history(self):
+        # Reuse the full app's HistoryDialog in lite mode (title column, no
+        # summary/series). Lazily imported to keep lite startup light.
+        from .app import HistoryDialog
+        HistoryDialog(self, lite=True).exec()
+
     def _open_settings(self):
         # Reuse the full app's SettingsDialog in lite mode (hides LLM tabs).
         # Lazily imported so lite startup stays free of the LLM modules.
@@ -246,6 +261,8 @@ class LiteWindow(QMainWindow):
         )
         self._recorder.start()
         self._start_ts = time.monotonic()
+        from datetime import datetime
+        self._rec_started_at = datetime.now()
         self.transcript.clear()
         self.copy_btn.setEnabled(False)
         self.record_btn.setText(t("stop_recording", time="0:00"))
@@ -316,7 +333,28 @@ class LiteWindow(QMainWindow):
         self.transcript.setPlainText(text)
         self.copy_btn.setEnabled(bool(text.strip()))
         self.status.setText(t("lite_done"))
+        self._save_history(text)
         self._handle_result(text)
+
+    def _save_history(self, text: str):
+        """Persist every transcript to the local history DB so nothing is lost."""
+        if not text.strip():
+            return
+        try:
+            from . import db
+            title = (self._agent_meeting or {}).get("title") or t("lite_manual_recording")
+            db.save_meeting(
+                context_name=None,
+                title=title,
+                started_at=getattr(self, "_rec_started_at", None),
+                duration_seconds=self._last_duration,
+                meeting_context="",
+                transcript=text,
+                summary="",
+                profile_name="",
+            )
+        except Exception:
+            _logger.exception("Failed to save transcript to history")
 
     def _handle_result(self, text: str):
         meeting = self._agent_meeting

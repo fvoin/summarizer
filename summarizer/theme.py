@@ -659,3 +659,23 @@ def gear_icon(size: int = 32, color: QColor = None) -> QIcon:
     p.drawPath(path)
     p.end()
     return QIcon(pm)
+
+
+def history_icon(size: int = 32, color: QColor = None) -> QIcon:
+    """Draw a clock icon for history (shared by the full app and Transcriber)."""
+    if color is None:
+        color = QColor(C["text_secondary"])
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(color, size * 0.07, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    m = size * 0.15
+    p.drawEllipse(int(m), int(m), int(size - m * 2), int(size - m * 2))
+    cx, cy = size / 2, size / 2
+    p.drawLine(int(cx), int(cy), int(cx), int(cy - size * 0.22))
+    p.drawLine(int(cx), int(cy), int(cx + size * 0.18), int(cy))
+    p.end()
+    return QIcon(pm)

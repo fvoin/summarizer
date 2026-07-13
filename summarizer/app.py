@@ -1703,12 +1703,18 @@ class ContextEditorDialog(QDialog):
 
 
 class HistoryDialog(QDialog):
-    """Dialog showing all recorded meetings."""
+    """Dialog showing all recorded meetings.
 
-    def __init__(self, parent=None):
+    lite: Transcriber mode — the first column shows the meeting title (no
+    series reassignment) and the summary column is hidden, since Transcriber
+    only produces transcripts.
+    """
+
+    def __init__(self, parent=None, lite: bool = False):
         super().__init__(parent)
+        self.lite = lite
         self.setWindowTitle(t("history_title"))
-        self.resize(700, 500)
+        self.resize(700 if not lite else 560, 500)
 
         from . import db
 
@@ -1729,7 +1735,7 @@ class HistoryDialog(QDialog):
         header_row.setContentsMargins(8, 0, 8, 4)
         header_row.setSpacing(12)
         for label_text, width in [
-            (t("history_col_context"), 240),
+            (t("history_col_title") if self.lite else t("history_col_context"), 240),
             (t("history_col_date"), 120),
             (t("history_col_duration"), 90),
         ]:
@@ -1738,7 +1744,8 @@ class HistoryDialog(QDialog):
             lbl.setStyleSheet(f"color: {C['text_secondary']}; font-size: 11px; {_no_border}")
             header_row.addWidget(lbl)
         header_row.addStretch()
-        for label_text in [t("history_transcript"), t("history_summary")]:
+        _view_cols = [t("history_transcript")] if self.lite else [t("history_transcript"), t("history_summary")]
+        for label_text in _view_cols:
             lbl = QLabel(f"<b>{label_text}</b>")
             lbl.setFixedWidth(90)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1763,7 +1770,6 @@ class HistoryDialog(QDialog):
             hlay.setContentsMargins(8, 6, 8, 6)
             hlay.setSpacing(12)
 
-            ctx = m.get("context_name") or "—"
             ts = m.get("started_at", "")[:16].replace("T", " ")
             dur = m.get("duration_seconds", 0)
             if dur:
@@ -1772,15 +1778,23 @@ class HistoryDialog(QDialog):
             else:
                 dur_str = "—"
 
-            ctx_lbl = _ClickableLabel(f"<b>{ctx}</b>")
-            ctx_lbl.setFixedWidth(240)
-            ctx_lbl.setToolTip(t("history_change_series_tt"))
-            ctx_lbl.setStyleSheet(
-                f"QLabel {{ border: none; background: transparent; }}"
-                f"QLabel:hover {{ color: {C['primary']}; }}"
-            )
-            ctx_lbl.clicked.connect(lambda mid=m["id"], lbl=ctx_lbl: self._change_series(mid, lbl))
-            hlay.addWidget(ctx_lbl)
+            if self.lite:
+                # Transcriber: show the meeting title, no series reassignment.
+                title_lbl = QLabel(f"<b>{m.get('title') or '—'}</b>")
+                title_lbl.setFixedWidth(240)
+                title_lbl.setStyleSheet(_no_border)
+                hlay.addWidget(title_lbl)
+            else:
+                ctx = m.get("context_name") or "—"
+                ctx_lbl = _ClickableLabel(f"<b>{ctx}</b>")
+                ctx_lbl.setFixedWidth(240)
+                ctx_lbl.setToolTip(t("history_change_series_tt"))
+                ctx_lbl.setStyleSheet(
+                    f"QLabel {{ border: none; background: transparent; }}"
+                    f"QLabel:hover {{ color: {C['primary']}; }}"
+                )
+                ctx_lbl.clicked.connect(lambda mid=m["id"], lbl=ctx_lbl: self._change_series(mid, lbl))
+                hlay.addWidget(ctx_lbl)
 
             date_lbl = QLabel(ts)
             date_lbl.setStyleSheet(f"color: {C['text_secondary']}; {_no_border}")
@@ -1794,7 +1808,11 @@ class HistoryDialog(QDialog):
 
             hlay.addStretch()
 
-            for field, tip in [("transcript", t("history_transcript")), ("summary", t("history_summary"))]:
+            row_title = (m.get("title") or "—") if self.lite else (m.get("context_name") or "—")
+            _fields = [("transcript", t("history_transcript"))]
+            if not self.lite:
+                _fields.append(("summary", t("history_summary")))
+            for field, tip in _fields:
                 btn_wrap = QWidget()
                 btn_wrap.setFixedWidth(90)
                 btn_wrap.setStyleSheet(_no_border)
@@ -1809,7 +1827,7 @@ class HistoryDialog(QDialog):
                     btn.setFixedSize(28, 28)
                     btn.setToolTip(tip)
                     btn.setStyleSheet(theme.ghost_btn() + f" QPushButton {{ {_no_border} }}")
-                    btn.clicked.connect(lambda _, mid=m["id"], title=ctx, f=field: self._view_text(mid, f, title))
+                    btn.clicked.connect(lambda _, mid=m["id"], title=row_title, f=field: self._view_text(mid, f, title))
                     blay.addWidget(btn)
                 hlay.addWidget(btn_wrap)
 
