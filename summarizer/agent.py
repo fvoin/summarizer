@@ -18,8 +18,10 @@ from . import config
 _logger = logging.getLogger("agent")
 _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
-# How often to poll (seconds)
-POLL_INTERVAL = 5 * 60
+# How often to poll (seconds). Kept short so meetings added or rescheduled
+# shortly before their start are still picked up in time. Requests are cheap
+# (ETag / 304 when unchanged).
+POLL_INTERVAL = 60
 # No-show timeout: if no voice for this many seconds after start, abort
 NO_SHOW_TIMEOUT = 5 * 60
 # How early before start to arm (seconds)
@@ -47,6 +49,7 @@ class AgentPoller(QThread):
         self._etag: str = ""
         self._armed_ids: set = set()
         self._next_interval: int = POLL_INTERVAL
+        self._last_data: list = []  # last meetings, reused on a 304 response
 
     def stop(self):
         self._running = False
@@ -87,9 +90,13 @@ class AgentPoller(QThread):
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 304:
-                _logger.debug("No changes (304)")
-                return
-            raise
+                # Unchanged list — but we still must re-check arm timing against
+                # the known meetings (their start time keeps approaching), so
+                # reuse the cached data instead of returning early.
+                _logger.debug("No changes (304), re-checking cached meetings")
+                data = self._last_data
+            else:
+                raise
 
         # Support both list and {meetings: [...]} / {data: [...]} responses
         if isinstance(data, dict):
@@ -100,6 +107,7 @@ class AgentPoller(QThread):
         if not isinstance(data, list):
             _logger.warning("Unexpected response format: %s", type(data))
             return
+        self._last_data = data
 
         now = datetime.now(timezone.utc)
         _logger.info("Poll returned %d meeting(s), now=%s", len(data), now.isoformat())
