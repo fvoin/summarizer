@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 import datetime
+from collections import deque
 from typing import Optional, List, Dict, Callable
 
 import numpy as np
@@ -25,6 +26,102 @@ def _log(msg: str):
     _logger.info(msg)
 
 
+class StreamSilenceDetector:
+    """Per-stream adaptive silence detector.
+
+    Every capture stream (each mic device, the system-audio tap) gets its own
+    instance. The tap emits digital zeros whenever nothing is playing; with a
+    single shared noise floor those zeros dragged the threshold down to the
+    minimum — below mic ambient level — so room noise counted as sound and
+    auto-stop never fired.
+
+    A frame alone never resets the silence timer: activity requires
+    SOUND_MIN_DURATION of above-threshold audio within the last SOUND_WINDOW
+    seconds, so a keyboard click or a chair creak can't keep a dead recording
+    alive, while half a second of speech always registers.
+    """
+
+    CALIBRATION_SECS = 3.0
+    FACTOR = 6.0
+    MIN_THRESHOLD = 0.005
+    # Hard cap, kept below quiet-speech RMS (~0.05): however wrong the noise
+    # floor gets (calibration during music, rising ambient), speech must stay
+    # above the threshold or the recorder would auto-stop mid-meeting.
+    MAX_THRESHOLD = 0.04
+    # Only frames below ADAPT_BAND × floor may move the floor. Frames between
+    # the floor and the threshold must not raise it: threshold = 6 × floor, so
+    # absorbing them is a positive-feedback loop (observed running the
+    # threshold up to 0.275 — above speech level) .
+    ADAPT_BAND = 2.0
+    ADAPT_ALPHA_UP = 0.002    # ambient rising: adapt slowly
+    ADAPT_ALPHA_DOWN = 0.05   # ambient dropping: recover fast
+    SOUND_WINDOW = 1.0
+    SOUND_MIN_DURATION = 0.15
+
+    def __init__(self, name: str, sample_rate: int):
+        self.name = name
+        self.sample_rate = sample_rate
+        self.calibrated = False
+        self.noise_floor = 0.0
+        self.threshold = self.MIN_THRESHOLD
+        self._calibration_end: Optional[float] = None
+        self._calibration_samples: list = []
+        self._loud: deque = deque()  # (timestamp, duration) of loud frames
+        self._loud_total = 0.0
+        self._peak = 0.0
+        self._last_log = 0.0
+
+    def _clamp(self, threshold: float) -> float:
+        return min(max(threshold, self.MIN_THRESHOLD), self.MAX_THRESHOLD)
+
+    def process(self, audio, now: float) -> bool:
+        """Consume one frame; return True if it is evidence of real sound."""
+        if len(audio) == 0:
+            return False
+        rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
+        duration = len(audio) / self.sample_rate
+
+        if not self.calibrated:
+            # The window opens at the first frame, not at construction: the
+            # pipeline can take seconds to deliver audio, and a wall-clock
+            # window from start() can close with a single sample in it.
+            if self._calibration_end is None:
+                self._calibration_end = now + self.CALIBRATION_SECS
+            self._calibration_samples.append(rms)
+            if now >= self._calibration_end:
+                # 10th percentile: quiet gaps, not speech bursts
+                raw_floor = float(np.percentile(self._calibration_samples, 10))
+                self.noise_floor = raw_floor
+                self.threshold = self._clamp(raw_floor * self.FACTOR)
+                self.calibrated = True
+                _log(f"Silence calibration done [{self.name}]: "
+                     f"noise_floor={raw_floor:.5f}, threshold={self.threshold:.5f} "
+                     f"({len(self._calibration_samples)} samples)")
+                self._calibration_samples = []
+            return True  # calibrating counts as activity: no auto-stop yet
+
+        band = max(self.noise_floor * self.ADAPT_BAND, self.MIN_THRESHOLD)
+        if rms < band:
+            alpha = self.ADAPT_ALPHA_DOWN if rms < self.noise_floor else self.ADAPT_ALPHA_UP
+            self.noise_floor = (1 - alpha) * self.noise_floor + alpha * rms
+            self.threshold = self._clamp(self.noise_floor * self.FACTOR)
+
+        if rms > self._peak:
+            self._peak = rms
+        if now - self._last_log >= 10.0:
+            _log(f"RMS[{self.name}]: current={rms:.5f}, peak={self._peak:.5f}, "
+                 f"threshold={self.threshold:.5f}, noise_floor={self.noise_floor:.5f}")
+            self._last_log = now
+            self._peak = 0.0
+
+        if rms >= self.threshold:
+            self._loud.append((now, duration))
+            self._loud_total += duration
+        while self._loud and self._loud[0][0] < now - self.SOUND_WINDOW:
+            self._loud_total -= self._loud.popleft()[1]
+        return self._loud_total >= self.SOUND_MIN_DURATION
+
+
 class AudioRecorder:
     def __init__(self, silence_timeout: float = 30.0, input_device: Optional[int] = None):
         self._recording = False
@@ -36,17 +133,12 @@ class AudioRecorder:
         self._last_sound_time: Optional[float] = None
         self._silence_threshold = silence_timeout
         self._sound_time_lock = threading.Lock()
-        # Guards the calibration/threshold state below, which is touched by
-        # several capture threads at once (each mic stream + the system-audio
-        # IO thread). Without it the read-modify-write of the noise floor races.
-        self._silence_lock = threading.Lock()
-        self._rms_threshold = 0.01
-        self._noise_floor = 0.0
+        # One detector per capture stream; the dict itself is guarded (streams
+        # register lazily from their own callback threads), while each
+        # detector's state is only ever touched by its own stream's thread.
+        self._detectors: Dict[int, StreamSilenceDetector] = {}
+        self._detectors_lock = threading.Lock()
         self._calibrating = True
-        self._calibration_samples: list = []
-        self._calibration_end: float = 0.0
-        self._peak_rms = 0.0
-        self._last_rms_log_time = 0.0
 
         self.sample_rate = 44100
         self.channels = 1
@@ -77,48 +169,31 @@ class AudioRecorder:
 
     # ── silence detection ────────────────────────────────────────────────
 
-    _CALIBRATION_SECS = 3.0
-    _CALIBRATION_FACTOR = 6.0
-    _MIN_THRESHOLD = 0.005
-    _NOISE_ADAPT_ALPHA = 0.005  # how fast noise floor tracks ambient changes
+    def _note_audio(self, stream_key: int, audio: np.ndarray,
+                    now: Optional[float] = None) -> bool:
+        """Feed one frame from a capture stream into its silence detector.
 
-    def _detect_silence(self, audio_data: np.ndarray) -> bool:
-        if len(audio_data) == 0:
-            return True
-        # Heavy math stays outside the lock; only shared-state access is guarded.
-        rms = float(np.sqrt(np.mean(audio_data.astype(np.float64) ** 2)))
-        now = time.time()
-
-        with self._silence_lock:
-            if rms > self._peak_rms:
-                self._peak_rms = rms
-
-            if self._calibrating:
-                self._calibration_samples.append(rms)
-                if now >= self._calibration_end:
-                    # Use 10th percentile to capture true quiet frames, ignoring speech bursts
-                    raw_floor = float(np.percentile(self._calibration_samples, 10)) if self._calibration_samples else 0.0
-                    self._noise_floor = raw_floor
-                    self._rms_threshold = max(raw_floor * self._CALIBRATION_FACTOR, self._MIN_THRESHOLD)
-                    self._calibrating = False
-                    with self._sound_time_lock:
-                        self._last_sound_time = now
-                    _log(f"Silence calibration done: noise_floor={raw_floor:.5f}, "
-                         f"threshold={self._rms_threshold:.5f} "
-                         f"({len(self._calibration_samples)} samples)")
-                return False
-
-            # Continuously adapt noise floor on quiet frames so threshold tracks ambient changes
-            if rms < self._rms_threshold:
-                self._noise_floor = (1 - self._NOISE_ADAPT_ALPHA) * self._noise_floor + self._NOISE_ADAPT_ALPHA * rms
-                self._rms_threshold = max(self._noise_floor * self._CALIBRATION_FACTOR, self._MIN_THRESHOLD)
-
-            if now - self._last_rms_log_time >= 10.0:
-                _log(f"RMS: current={rms:.5f}, peak={self._peak_rms:.5f}, threshold={self._rms_threshold:.5f}, noise_floor={self._noise_floor:.5f}")
-                self._last_rms_log_time = now
-                self._peak_rms = 0.0
-
-            return rms < self._rms_threshold
+        Refreshes ``_last_sound_time`` when the stream shows real (sustained)
+        sound. Auto-stop fires only when EVERY stream has been silent for the
+        whole timeout.
+        """
+        if now is None:
+            now = time.time()
+        with self._detectors_lock:
+            det = self._detectors.get(stream_key)
+            if det is None:
+                name = ("system" if stream_key == self._SYS_AUDIO_DEV
+                        else f"mic-{stream_key}")
+                det = StreamSilenceDetector(name, self.sample_rate)
+                self._detectors[stream_key] = det
+        activity = det.process(audio, now)
+        if self._calibrating and det.calibrated:
+            self._calibrating = False
+        if activity:
+            with self._sound_time_lock:
+                if self._last_sound_time is None or now > self._last_sound_time:
+                    self._last_sound_time = now
+        return activity
 
     # ── recording ────────────────────────────────────────────────────────
 
@@ -146,11 +221,9 @@ class AudioRecorder:
         self._stop_event = threading.Event()
         now = time.time()
         self._last_sound_time = now
-        self._last_rms_log_time = now
-        self._peak_rms = 0.0
         self._calibrating = True
-        self._calibration_samples = []
-        self._calibration_end = now + self._CALIBRATION_SECS
+        with self._detectors_lock:
+            self._detectors = {}
         self._temp_files = []
         self._mic_files = []
         self._sys_file = None
@@ -324,9 +397,7 @@ class AudioRecorder:
                 np.arange(len(audio)),
                 audio,
             ).astype(np.float32)
-        if not self._detect_silence(audio):
-            with self._sound_time_lock:
-                self._last_sound_time = time.time()
+        self._note_audio(self._SYS_AUDIO_DEV, audio)
         with self._rt_lock:
             if self._SYS_AUDIO_DEV not in self._rt_frames_per_device:
                 self._rt_frames_per_device[self._SYS_AUDIO_DEV] = []
@@ -453,9 +524,7 @@ class AudioRecorder:
                     mono = indata.mean(axis=1, keepdims=True).astype(np.float32)
                 else:
                     mono = indata.reshape(-1, 1).astype(np.float32)
-                if not self._detect_silence(mono):
-                    with self._sound_time_lock:
-                        self._last_sound_time = time.time()
+                self._note_audio(device_id, mono)
                 f.write(mono)
                 frames_written += frame_count
                 with self._rt_lock:
@@ -470,10 +539,12 @@ class AudioRecorder:
 
         _log(f"Recording thread done (dev {device_id}): {frames_written} frames → {filename}")
 
+    _MONITOR_POLL_SECS = 1.0
+
     def _monitor_silence(self):
         while not self._stop_event.is_set() and self._recording:
             if self._calibrating:
-                time.sleep(1.0)
+                time.sleep(self._MONITOR_POLL_SECS)
                 continue
             with self._sound_time_lock:
                 elapsed = time.time() - self._last_sound_time
@@ -484,7 +555,7 @@ class AudioRecorder:
                 if self._on_auto_stop:
                     self._on_auto_stop()
                 break
-            time.sleep(1.0)
+            time.sleep(self._MONITOR_POLL_SECS)
 
     def stop(self) -> Optional[str]:
         if self._stop_event is None:
