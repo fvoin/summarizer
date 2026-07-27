@@ -59,6 +59,10 @@ class _LiteUpdateDownloadWorker(QThread):
 
 
 class LiteWindow(QMainWindow):
+    # Emitted by the recorder's silence-monitor thread; handled queued on the
+    # main thread so auto-stop finalizes exactly like a manual Stop.
+    _auto_stop_signal = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(t("lite_title"))
@@ -67,6 +71,7 @@ class LiteWindow(QMainWindow):
         self._start_ts = None
         self._last_duration = 0
         self._workers = []
+        self._wire_auto_stop()
 
         central = QWidget()
         lay = QVBoxLayout(central)
@@ -259,7 +264,7 @@ class LiteWindow(QMainWindow):
             silence_timeout=cfg.get("silence_timeout", 30),
             input_device=cfg.get("input_device"),
         )
-        self._recorder.start()
+        self._recorder.start(on_auto_stop=self._auto_stop_signal.emit)
         self._start_ts = time.monotonic()
         from datetime import datetime
         self._rec_started_at = datetime.now()
@@ -297,7 +302,18 @@ class LiteWindow(QMainWindow):
         secs = int(time.monotonic() - self._start_ts)
         self.record_btn.setText(t("stop_recording", time=f"{secs // 60}:{secs % 60:02d}"))
 
+    def _wire_auto_stop(self):
+        self._auto_stop_signal.connect(self._on_auto_stopped)
+
+    def _on_auto_stopped(self):
+        if self._recorder is None:
+            return  # already stopped manually before the signal was delivered
+        self._stop()
+        self.status.setText(t("status_silence") + t("status_transcribing"))
+
     def _stop(self):
+        if self._recorder is None:
+            return
         self._timer.stop()
         self.record_btn.setText(t("start_recording"))
         self.record_btn.setStyleSheet(theme.btn_primary())

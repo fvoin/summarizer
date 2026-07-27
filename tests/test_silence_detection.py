@@ -193,12 +193,103 @@ def test_monitor_autostops_after_silence():
     r = _bare_recorder(timeout=0.3)
     r._MONITOR_POLL_SECS = 0.05
     r._calibrating = False
+    r._heard_sound = True
     r._last_sound_time = time.time() - 1.0
     stopped = threading.Event()
     r._on_auto_stop = stopped.set
     r._monitor_silence()
     assert stopped.is_set()
     assert r._stop_event.is_set()
+
+
+class _FakeTap:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+def test_monitor_stops_tap_when_no_callback():
+    # A silence auto-stop with no app callback must not leak the system-audio
+    # tap (observed in production: taps kept writing GBs for hours).
+    r = _bare_recorder(timeout=0.3)
+    r._MONITOR_POLL_SECS = 0.05
+    r._calibrating = False
+    r._heard_sound = True
+    r._last_sound_time = time.time() - 1.0
+    tap = _FakeTap()
+    r._sys_audio = tap
+    r._monitor_silence()
+    assert tap.stopped
+
+
+def test_monitor_stops_tap_when_callback_raises():
+    r = _bare_recorder(timeout=0.3)
+    r._MONITOR_POLL_SECS = 0.05
+    r._calibrating = False
+    r._heard_sound = True
+    r._last_sound_time = time.time() - 1.0
+    tap = _FakeTap()
+    r._sys_audio = tap
+
+    def boom():
+        raise RuntimeError("app handler died")
+
+    r._on_auto_stop = boom
+    r._monitor_silence()
+    assert tap.stopped
+
+
+def test_no_autostop_before_first_sound():
+    # Waiting-room grace: an armed recording where the meeting hasn't started
+    # yet (no sound ever heard) must not auto-stop on the normal timeout.
+    r = _bare_recorder(timeout=0.3)
+    r._MONITOR_POLL_SECS = 0.05
+    r._calibrating = False
+    assert not r._heard_sound
+    r._last_sound_time = time.time() - 1.0
+    stopped = threading.Event()
+    r._on_auto_stop = stopped.set
+    th = threading.Thread(target=r._monitor_silence, daemon=True)
+    th.start()
+    time.sleep(0.3)
+    assert not stopped.is_set()
+    r._stop_event.set()
+    th.join(timeout=2)
+
+
+def test_autostop_after_grace_even_without_sound():
+    # A recording that never hears anything (dead mic, meeting never joined)
+    # must still stop eventually.
+    r = _bare_recorder(timeout=0.3)
+    r._MONITOR_POLL_SECS = 0.05
+    r._PRE_SOUND_GRACE_SECS = 0.5
+    r._calibrating = False
+    r._last_sound_time = time.time() - 1.0
+    stopped = threading.Event()
+    r._on_auto_stop = stopped.set
+    r._monitor_silence()
+    assert stopped.is_set()
+
+
+def test_heard_sound_set_only_by_post_calibration_activity():
+    r = _bare_recorder()
+    now = 0.0
+    # Whole calibration window reports activity, but that must not count as
+    # "the meeting produced sound".
+    for _ in range(int((StreamSilenceDetector.CALIBRATION_SECS + 0.2) / FRAME_DUR)):
+        now += FRAME_DUR
+        r._note_audio(2, _frame(0.005), now=now)
+    assert not r._heard_sound
+    for _ in range(int(1.0 / FRAME_DUR)):  # quiet ambient: still no sound
+        now += FRAME_DUR
+        r._note_audio(2, _frame(0.006), now=now)
+    assert not r._heard_sound
+    for _ in range(10):  # real speech
+        now += FRAME_DUR
+        r._note_audio(2, _frame(0.08), now=now)
+    assert r._heard_sound
 
 
 def test_monitor_waits_while_calibrating():

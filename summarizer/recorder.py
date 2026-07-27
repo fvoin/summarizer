@@ -139,6 +139,7 @@ class AudioRecorder:
         self._detectors: Dict[int, StreamSilenceDetector] = {}
         self._detectors_lock = threading.Lock()
         self._calibrating = True
+        self._heard_sound = False
 
         self.sample_rate = 44100
         self.channels = 1
@@ -186,10 +187,15 @@ class AudioRecorder:
                         else f"mic-{stream_key}")
                 det = StreamSilenceDetector(name, self.sample_rate)
                 self._detectors[stream_key] = det
+        was_calibrated = det.calibrated
         activity = det.process(audio, now)
         if self._calibrating and det.calibrated:
             self._calibrating = False
         if activity:
+            # Calibration frames report activity but aren't evidence the
+            # meeting has actually produced sound yet.
+            if was_calibrated:
+                self._heard_sound = True
             with self._sound_time_lock:
                 if self._last_sound_time is None or now > self._last_sound_time:
                     self._last_sound_time = now
@@ -222,6 +228,7 @@ class AudioRecorder:
         now = time.time()
         self._last_sound_time = now
         self._calibrating = True
+        self._heard_sound = False
         with self._detectors_lock:
             self._detectors = {}
         self._temp_files = []
@@ -540,6 +547,11 @@ class AudioRecorder:
         _log(f"Recording thread done (dev {device_id}): {frames_written} frames → {filename}")
 
     _MONITOR_POLL_SECS = 1.0
+    # Before the first real sound (meeting not started yet — waiting room,
+    # nobody joined), the normal silence timeout must not apply: stopping at
+    # 30s of pre-meeting quiet loses the whole meeting that follows. A dead
+    # recording that never hears anything still stops after this cap.
+    _PRE_SOUND_GRACE_SECS = 600.0
 
     def _monitor_silence(self):
         while not self._stop_event.is_set() and self._recording:
@@ -548,12 +560,26 @@ class AudioRecorder:
                 continue
             with self._sound_time_lock:
                 elapsed = time.time() - self._last_sound_time
-            if elapsed > self._silence_threshold:
-                _log(f"Silence detected ({elapsed:.1f}s > {self._silence_threshold}s). Auto-stopping.")
+            timeout = (self._silence_threshold if self._heard_sound
+                       else self._PRE_SOUND_GRACE_SECS)
+            if elapsed > timeout:
+                _log(f"Silence detected ({elapsed:.1f}s > {timeout}s, "
+                     f"heard_sound={self._heard_sound}). Auto-stopping.")
                 self._stop_event.set()
                 self._recording = False
-                if self._on_auto_stop:
-                    self._on_auto_stop()
+                cb = self._on_auto_stop
+                if cb is None:
+                    # Nobody will finalize this session: stop everything here
+                    # so the system-audio tap can't outlive it and keep
+                    # writing to disk.
+                    self.stop()
+                else:
+                    try:
+                        cb()
+                    except Exception:
+                        _logger.exception("on_auto_stop callback failed; "
+                                          "stopping recorder directly")
+                        self.stop()
                 break
             time.sleep(self._MONITOR_POLL_SECS)
 
