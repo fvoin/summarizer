@@ -51,7 +51,7 @@ Bump `APP_VERSION` in `summarizer/config.py` before each release — the GitHub 
 
 ## Notes
 
-- No test suite exists in this project.
+- Tests live in `tests/` (pytest). Run with `source .venv/bin/activate && QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q`.
 - The app requires microphone permission on macOS (set via entitlements.plist and Info.plist patching in build).
 - ffmpeg is bundled as a static binary (downloaded during build) and also searched at system paths at runtime.
 - Intel builds need `ctranslate2==4.6.0` pinned (no newer x86_64 wheels available).
