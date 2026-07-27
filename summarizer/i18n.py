@@ -387,6 +387,8 @@ _STRINGS: Dict[str, Dict[str, str]] = {
     "lite_update_avail": {"en": "Update available: {ver}", "ru": "Доступно обновление: {ver}"},
     "lite_updating": {"en": "Downloading update…", "ru": "Загрузка обновления…"},
     "lite_update_done": {"en": "Opening installer…", "ru": "Открываю установщик…"},
+    "lite_update_restarting": {"en": "Update installed — restarting…", "ru": "Обновление установлено — перезапуск…"},
+    "lite_update_stop_first": {"en": "Stop the recording before updating", "ru": "Остановите запись перед обновлением"},
     "lite_agent_waiting": {"en": "Waiting for scheduled meetings…",
                             "ru": "Ожидание запланированных встреч…"},
     "lite_agent_countdown": {"en": "Auto-record «{title}» in {mins} min",

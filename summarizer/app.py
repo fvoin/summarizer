@@ -334,7 +334,7 @@ class UpdateCheckWorker(QThread):
 
 class UpdateDownloadWorker(QThread):
     progress = pyqtSignal(int)   # percent 0-100
-    finished = pyqtSignal()
+    finished = pyqtSignal(bool)  # True: installed in place, app must restart
     error = pyqtSignal(str)
 
     def __init__(self, dmg_url: str):
@@ -346,8 +346,15 @@ class UpdateDownloadWorker(QThread):
             def _on_progress(downloaded, total):
                 if total > 0:
                     self.progress.emit(int(downloaded * 100 / total))
-            download_and_open(self.dmg_url, progress_cb=_on_progress)
-            self.finished.emit()
+            from . import updater
+            try:
+                updater.self_update(self.dmg_url, progress_cb=_on_progress)
+                self.finished.emit(True)
+            except RuntimeError as e:
+                # Dev run or unexpected DMG layout: manual drag-install.
+                _logger.info("self-update unavailable (%s); opening DMG", e)
+                download_and_open(self.dmg_url, progress_cb=_on_progress)
+                self.finished.emit(False)
         except Exception as e:
             _logger.exception("Update download failed")
             self.error.emit(str(e))
@@ -2433,6 +2440,12 @@ class SettingsDialog(QDialog):
         QMessageBox.warning(self, t("update_check_failed"), msg)
 
     def _start_download(self, dmg_url: str):
+        rec = getattr(self.parent(), "_recorder", None)
+        if rec is not None and rec.is_recording():
+            # A one-click update quits and relaunches — never mid-recording.
+            QMessageBox.information(self, t("update_ready_title"),
+                                    t("lite_update_stop_first"))
+            return
         self._update_btn.setEnabled(False)
         self._update_btn.setText(t("downloading_update"))
         self._update_progress.setValue(0)
@@ -2444,10 +2457,19 @@ class SettingsDialog(QDialog):
         self._download_worker = worker
         worker.start()
 
-    def _on_update_download_finished(self):
+    def _on_update_download_finished(self, restarting: bool = False):
         self._update_progress.setVisible(False)
         self._update_btn.setText(t("check_updates"))
         self._update_btn.setEnabled(True)
+
+        if restarting:
+            QMessageBox.information(self, t("update_ready_title"),
+                                    t("lite_update_restarting"))
+            # Both MainWindow and LiteWindow define _tray_quit with proper
+            # thread teardown; the detached helper swaps and relaunches.
+            quit_fn = getattr(self.parent(), "_tray_quit", None) or QApplication.quit
+            QTimer.singleShot(300, quit_fn)
+            return
 
         from pathlib import Path
         dmg_path = Path.home() / "Downloads" / "Summarizer.dmg"

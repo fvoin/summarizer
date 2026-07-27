@@ -43,17 +43,31 @@ class _LiteUpdateCheckWorker(QThread):
 
 
 class _LiteUpdateDownloadWorker(QThread):
-    done = pyqtSignal()
+    done = pyqtSignal(bool)      # True: update installed, app must restart
     error = pyqtSignal(str)
+    progress = pyqtSignal(int)   # percent 0-100
 
     def __init__(self, url, parent=None):
         super().__init__(parent)
         self._url = url
 
     def run(self):
+        from . import updater
+
+        def _cb(done_bytes, total_bytes):
+            if total_bytes > 0:
+                self.progress.emit(int(done_bytes * 100 / total_bytes))
+
         try:
-            download_and_open(self._url)
-            self.done.emit()
+            try:
+                updater.self_update(self._url, progress_cb=_cb)
+                self.done.emit(True)
+            except RuntimeError as e:
+                # Not an installed bundle (dev run) or unexpected DMG layout:
+                # fall back to open-the-DMG manual install.
+                _logger.info("self-update unavailable (%s); opening DMG", e)
+                updater.download_and_open(self._url, progress_cb=_cb)
+                self.done.emit(False)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -112,6 +126,12 @@ class LiteWindow(QMainWindow):
         self.update_btn.setVisible(False)
         self.update_btn.clicked.connect(self._download_update)
         row.addWidget(self.update_btn)
+
+        self.update_progress = QProgressBar()
+        self.update_progress.setRange(0, 100)
+        self.update_progress.setMaximumWidth(160)
+        self.update_progress.setVisible(False)
+        row.addWidget(self.update_progress)
         lay.addLayout(row)
 
         self.setCentralWidget(central)
@@ -415,13 +435,39 @@ class LiteWindow(QMainWindow):
     def _download_update(self):
         if not self._update_url:
             return
+        if self._recorder is not None and self._recorder.is_recording():
+            # A one-click update quits and relaunches the app — never allow
+            # that to kill a live recording.
+            self.status.setText(t("lite_update_stop_first"))
+            return
         self.status.setText(t("lite_updating"))
         self.update_btn.setEnabled(False)
+        self.update_progress.setValue(0)
+        self.update_progress.setVisible(True)
         worker = _LiteUpdateDownloadWorker(self._update_url, self)
-        worker.done.connect(lambda: self.status.setText(t("lite_update_done")))
-        worker.error.connect(lambda e: self.status.setText(t("lite_error", err=e)))
+        worker.progress.connect(self.update_progress.setValue)
+        worker.done.connect(self._on_update_downloaded)
+        worker.error.connect(self._on_update_error)
         self._track(worker)
         worker.start()
+
+    def _on_update_downloaded(self, restarting: bool):
+        self.update_progress.setVisible(False)
+        if restarting:
+            self.status.setText(t("lite_update_restarting"))
+            # Give the status a beat to paint, then quit; the detached swap
+            # helper replaces the bundle and relaunches.
+            QTimer.singleShot(800, self._restart_for_update)
+        else:
+            self.status.setText(t("lite_update_done"))
+
+    def _on_update_error(self, e):
+        self.update_progress.setVisible(False)
+        self.update_btn.setEnabled(True)
+        self.status.setText(t("lite_error", err=e))
+
+    def _restart_for_update(self):
+        self._tray_quit()
 
     def _track(self, worker):
         self._workers.append(worker)
