@@ -6,7 +6,7 @@ from typing import Optional, List
 
 _logger = logging.getLogger("config")
 
-APP_VERSION = "1.22.9"
+APP_VERSION = "1.22.10"
 
 # Which build this is: "full" (Summarizer) or "lite" (Summarizer Lite /
 # Transcriber). Set by the lite entry point (run_lite.py) via env var so the
@@ -210,7 +210,7 @@ _DEFAULTS = {
     "input_device": None,
     "recordings_dir": "",
     "theme": "light",
-    "menubar_enabled": False,
+    "menubar_enabled": True,
     "agent_url": "",
     "agent_token": "",
     "agent_enabled": False,

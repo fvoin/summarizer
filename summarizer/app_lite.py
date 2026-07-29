@@ -488,65 +488,143 @@ class LiteWindow(QMainWindow):
 
 
 class LiteSetupWizard(QDialog):
+    """First-run wizard: mic → backend → model quality (offer medium)."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("lite_setup_title"))
+        self.setStyleSheet(theme.window_style())
         self._cfg = config.load()
-        self._model = self._cfg.get("whisper_model", "base")
 
         self._stack = QStackedWidget()
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(28, 24, 28, 24)
+        lay.setSpacing(16)
         lay.addWidget(self._stack)
+
+        def _title(key):
+            lbl = QLabel(t(key))
+            lbl.setStyleSheet("font-size: 16px; font-weight: 700;")
+            return lbl
+
+        def _text(key):
+            lbl = QLabel(t(key))
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"font-size: 13px; color: {theme.C['text_secondary']};")
+            return lbl
 
         # Step 1 — mic
         s1 = QWidget(); l1 = QVBoxLayout(s1)
-        l1.addWidget(QLabel(t("lite_setup_mic")))
+        l1.setSpacing(12)
+        l1.addWidget(_title("lite_setup_mic_title"))
+        l1.addWidget(_text("lite_setup_mic"))
         self._mic = MicPicker(selected=self._cfg.get("input_device"))
         l1.addWidget(self._mic)
-        b1 = QPushButton(t("wizard_next")); b1.clicked.connect(self._to_backend)
-        l1.addWidget(b1)
+        l1.addStretch(1)
+        b1 = QPushButton(t("wizard_next"))
+        b1.setStyleSheet(theme.btn_primary())
+        b1.clicked.connect(self._to_backend)
+        r1 = QHBoxLayout(); r1.addStretch(1); r1.addWidget(b1)
+        l1.addLayout(r1)
         self._stack.addWidget(s1)
 
         # Step 2 — backend
-        s2 = QWidget(); l2 = QFormLayout(s2)
+        s2 = QWidget(); l2 = QVBoxLayout(s2)
+        l2.setSpacing(12)
+        l2.addWidget(_title("lite_setup_backend_title"))
+        l2.addWidget(_text("lite_setup_backend_text"))
+        form = QFormLayout()
         self._url = QLineEdit(self._cfg.get("agent_url", ""))
         self._token = QLineEdit(self._cfg.get("agent_token", ""))
         self._token.setEchoMode(QLineEdit.EchoMode.Password)
-        l2.addRow(t("lite_setup_url"), self._url)
-        l2.addRow(t("lite_setup_token"), self._token)
-        b2 = QPushButton(t("wizard_next")); b2.clicked.connect(self._to_download)
-        l2.addRow(b2)
+        form.addRow(t("lite_setup_url"), self._url)
+        form.addRow(t("lite_setup_token"), self._token)
+        l2.addLayout(form)
+        l2.addStretch(1)
+        back2 = QPushButton(t("wizard_back"))
+        back2.setStyleSheet(theme.ghost_btn())
+        back2.clicked.connect(lambda: self._stack.setCurrentIndex(0))
+        b2 = QPushButton(t("wizard_next"))
+        b2.setStyleSheet(theme.btn_primary())
+        b2.clicked.connect(self._to_model)
+        r2 = QHBoxLayout(); r2.addWidget(back2); r2.addStretch(1); r2.addWidget(b2)
+        l2.addLayout(r2)
         self._stack.addWidget(s2)
 
-        # Step 3 — download
+        # Step 3 — model quality: offer the medium model, or keep base
         s3 = QWidget(); l3 = QVBoxLayout(s3)
-        l3.addWidget(QLabel(t("lite_setup_download")))
+        l3.setSpacing(12)
+        l3.addWidget(_title("lite_setup_model_title"))
+        l3.addWidget(_text("lite_setup_model_text"))
         self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setVisible(False)
         l3.addWidget(self._bar)
+        self._dl_status = QLabel("")
+        self._dl_status.setWordWrap(True)
+        self._dl_status.setStyleSheet("font-size: 12px;")
+        l3.addWidget(self._dl_status)
+        l3.addStretch(1)
+        self._skip_btn = QPushButton(t("lite_setup_model_skip"))
+        self._skip_btn.setStyleSheet(theme.ghost_btn())
+        self._skip_btn.clicked.connect(self._skip_model)
+        self._download_btn = QPushButton(t("lite_setup_model_download"))
+        self._download_btn.setStyleSheet(theme.btn_primary())
+        self._download_btn.clicked.connect(self._download_medium)
+        r3 = QHBoxLayout()
+        r3.addWidget(self._skip_btn); r3.addStretch(1); r3.addWidget(self._download_btn)
+        l3.addLayout(r3)
         self._stack.addWidget(s3)
 
-        self.resize(420, 240)
+        self.setFixedWidth(460)
 
     def _to_backend(self):
         self._cfg["input_device"] = self._mic.selected_device()
         self._stack.setCurrentIndex(1)
 
-    def _to_download(self):
+    def _to_model(self):
         self._cfg["agent_url"] = self._url.text().strip()
         self._cfg["agent_token"] = self._token.text().strip()
         self._cfg["agent_enabled"] = bool(self._cfg["agent_url"])
-        self._cfg["whisper_model"] = self._model
-        config.save(self._cfg)
-        self._stack.setCurrentIndex(2)
-        if config.is_model_downloaded(self._model):
-            self._bar.setValue(100)
-            self.accept()
+        if config.is_model_downloaded("medium"):
+            self._finish("medium")  # already there: nothing to offer
             return
-        self._dl = _LiteModelDownloadWorker(self._model)
+        self._stack.setCurrentIndex(2)
+
+    def _download_medium(self):
+        self._start_download("medium")
+
+    def _skip_model(self):
+        base = self._cfg.get("whisper_model", "base")
+        if config.is_model_downloaded(base):
+            self._finish(base)
+        else:
+            # base missing (unbundled build): it has to be fetched anyway
+            self._start_download(base)
+
+    def _start_download(self, model: str):
+        self._download_btn.setEnabled(False)
+        self._skip_btn.setEnabled(False)
+        self._dl_status.setText(t("lite_setup_download"))
+        self._bar.setValue(0)
+        self._bar.setVisible(True)
+        self._dl = _LiteModelDownloadWorker(model)
         self._dl.progress.connect(lambda p: self._bar.setValue(int(p * 100)))
-        self._dl.done.connect(self.accept)
-        self._dl.error.connect(lambda e: self.reject())
+        self._dl.done.connect(lambda: self._finish(model))
+        self._dl.error.connect(self._on_download_error)
         self._dl.start()
+
+    def _on_download_error(self, err: str):
+        # Keep the wizard open: the user can retry or fall back to Skip.
+        self._bar.setVisible(False)
+        self._dl_status.setText(t("lite_error", err=err))
+        self._download_btn.setEnabled(True)
+        self._skip_btn.setEnabled(True)
+
+    def _finish(self, model: str):
+        self._cfg["whisper_model"] = model
+        config.save(self._cfg)
+        self.accept()
 
 
 class _LiteModelDownloadWorker(QThread):

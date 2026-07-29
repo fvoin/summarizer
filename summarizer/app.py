@@ -2265,7 +2265,7 @@ class SettingsDialog(QDialog):
         general_form.addRow(t("theme_label"), theme_widget)
 
         self.menubar_check = QCheckBox(t("menubar_check"))
-        self.menubar_check.setChecked(bool(self.cfg.get("menubar_enabled", False)))
+        self.menubar_check.setChecked(bool(self.cfg.get("menubar_enabled", True)))
         general_form.addRow(t("menubar_label"), self.menubar_check)
 
         self.sound_on_done_check = QCheckBox(t("sound_check"))
@@ -3109,7 +3109,7 @@ class MainWindow(QMainWindow):
         self._tray.rec_action.triggered.connect(self._toggle_recording)
         self._tray.settings_action.triggered.connect(self._open_settings)
         self._tray.quit_action.triggered.connect(self._tray_quit)
-        if config.load().get("menubar_enabled", False):
+        if config.load().get("menubar_enabled", True):
             self._tray.show()
 
     @staticmethod
@@ -3156,7 +3156,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_tray(self):
         """Show/hide tray based on current config."""
-        if config.load().get("menubar_enabled", False):
+        if config.load().get("menubar_enabled", True):
             self._tray.show()
         else:
             self._tray.hide()
