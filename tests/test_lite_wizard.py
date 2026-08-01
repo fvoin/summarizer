@@ -77,6 +77,29 @@ def test_model_step_skipped_when_medium_already_downloaded(wizard_env):
     assert wiz.result() == QDialog.DialogCode.Accepted
 
 
+def test_downloading_medium_removes_cached_base(wizard_env, tmp_path, monkeypatch):
+    # base ships inside the app bundle; the copy in ~/.summarizer/models is
+    # redundant once medium is the default — free the disk space.
+    models = tmp_path / "models"
+    (models / "base").mkdir(parents=True)
+    (models / "base" / "model.bin").write_bytes(b"x")
+    monkeypatch.setattr(config, "get_models_dir", lambda: models)
+    wiz = app_lite.LiteSetupWizard()
+    _advance_to_model_step(wiz)
+    wiz._download_medium()
+    assert not (models / "base").exists()
+
+
+def test_skip_keeps_cached_base(wizard_env, tmp_path, monkeypatch):
+    models = tmp_path / "models"
+    (models / "base").mkdir(parents=True)
+    monkeypatch.setattr(config, "get_models_dir", lambda: models)
+    wiz = app_lite.LiteSetupWizard()
+    _advance_to_model_step(wiz)
+    wiz._skip_model()
+    assert (models / "base").exists()
+
+
 def test_wizard_uses_app_theme(wizard_env):
     wiz = app_lite.LiteSetupWizard()
     assert wiz.styleSheet()  # themed, not the bare default QDialog

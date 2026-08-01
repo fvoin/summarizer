@@ -624,6 +624,13 @@ class LiteSetupWizard(QDialog):
     def _finish(self, model: str):
         self._cfg["whisper_model"] = model
         config.save(self._cfg)
+        if model != "base":
+            # The compact base stays bundled inside the app; its copy in the
+            # user cache is redundant once a better model is the default.
+            import shutil
+            base_dir = config.get_models_dir() / "base"
+            if base_dir.exists():
+                shutil.rmtree(base_dir, ignore_errors=True)
         self.accept()
 
 

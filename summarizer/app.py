@@ -374,8 +374,10 @@ class ModelDownloadWorker(QThread):
     def run(self):
         try:
             self.progress.emit(self.model_name, 0)
-            download_model(self.model_name)
-            self.progress.emit(self.model_name, 100)
+            download_model(
+                self.model_name,
+                progress_cb=lambda p: self.progress.emit(self.model_name, int(p * 100)),
+            )
             self.finished.emit(self.model_name)
         except Exception as e:
             self.error.emit(self.model_name, str(e))

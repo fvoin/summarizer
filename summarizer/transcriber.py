@@ -34,11 +34,36 @@ def download_model(model_name: str, progress_cb: Optional[Callable[[float], None
 
     _log(f"Downloading model {model_name} ({info['repo']}) → {dest}")
 
-    snapshot_download(
-        repo_id=info["repo"],
-        local_dir=str(dest),
-    )
+    # snapshot_download exposes no progress callback, so poll the destination
+    # directory size (including hub temp files) against the expected total.
+    import threading
+    stop = threading.Event()
+    total = info.get("size_mb", 0) * 1024 * 1024
+    if progress_cb and total:
+        def _poll():
+            while not stop.is_set():
+                size = 0
+                for f in dest.rglob("*"):
+                    try:
+                        if f.is_file():
+                            size += f.stat().st_size
+                    except OSError:
+                        pass  # hub renames temp files mid-scan
+                # size_mb is approximate: hold just under 1.0 until finished
+                progress_cb(min(size / total, 0.99))
+                stop.wait(0.5)
+        threading.Thread(target=_poll, daemon=True).start()
 
+    try:
+        snapshot_download(
+            repo_id=info["repo"],
+            local_dir=str(dest),
+        )
+    finally:
+        stop.set()
+
+    if progress_cb:
+        progress_cb(1.0)
     _log(f"Model {model_name} downloaded to {dest}")
     return dest
 
